@@ -1,0 +1,364 @@
+---
+title: "rq2"
+author: "Zoe Klein"
+date: "2/27/2022"
+output: word_document
+---
+```{r}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(lmerTest)
+library(forcats)
+library(plotrix)
+library(emmeans)
+library(MuMIn)
+library(ggpubr)
+```
+##Load Data, Wrangle 
+```{r}
+####Wrangle####
+biomass_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/Mass_8521.xlsx" , sheet = 2)
+
+##tidying up the data and creating the root:shoot ratio for each individual 
+biomass_tidy<-biomass_untidy %>% 
+  mutate(population = as.factor(population)) %>% 
+  pivot_wider(names_from = Plant_Part, values_from = Mass_g) %>%
+  mutate(Ratio_RS = Root/Shoot) %>% 
+  drop_na(Ratio_RS)
+
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes)) %>%
+  mutate(population = as.factor(population),
+         cv_temp_mon = as.factor(cv_temp_mon),
+         temp_cv = as.factor(temp_cv))
+  
+##joining together with the climate data 
+biomass_clim<-inner_join(biomass_tidy,climate_ID) 
+
+biomass_clim %>% ggplot(aes(x = log(Ratio_RS))) + geom_density() ##log transform is appropriate
+
+biomass_trans <- biomass_clim %>% mutate(logRatio_RS = log(Ratio_RS))
+
+## removing clear/obvious outliers and wonkyness, and removing plants with reproductive biomass 
+biomass_trans  %>%
+  ggplot(aes(x = cv_temp_mon , y =Ratio_RS)) + geom_violin(aes(color = treatment)) + 
+  facet_grid(~ monsoon) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+bm1<-biomass_trans  %>% filter(Ratio_RS < 14) %>%
+  mutate(Reproductive = if_else(is.na(Reproductive), 1 , Reproductive)) %>%
+  filter(Reproductive == 1)
+
+biomass_trans  %>% filter(Ratio_RS < 14) %>%
+  ggplot(aes(x = cv_temp_mon , y =Ratio_RS)) + geom_violin(aes(color = treatment)) + 
+  facet_grid(~ monsoon) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+####Interactive Mixed Models####
+model1<- lm(logRatio_RS ~ SAT_C*treatment + SAP_mm*treatment + cv*treatment, data = bm1)
+##removing outliers based on the assumption that x3 Cooks Distance from the mean gets removed 
+cooksD <- cooks.distance(model1)
+influential <- cooksD[(cooksD > (3 * mean(cooksD, na.rm = TRUE)))]
+##model without 50 outliers
+names_of_influential <- names(influential)
+outliers <- bm1[names_of_influential,]#summary stats about outliers 
+bm2 <- bm1 %>% anti_join(outliers) #remove outliers from data frame 
+
+total_bm<- bm2 %>%
+  mutate(Total_g = Shoot + Root)
+
+
+```
+##first order model 
+```{r}
+#ratio
+model<-lm(logRatio_RS ~ treatment*population, data = bm2)
+summary(model)
+anova(model
+      )
+
+emm<- emmeans(model, pairwise ~ population|treatment)
+emmC<- emm[["contrasts"]]
+multcomp::cld(emm, alpha = 0.05, Letters = LETTERS)
+
+
+#total biomass
+
+model<-lm(Total_g ~ treatment*population, data = total_bm)
+summary(model)
+anova(model)
+
+
+```
+
+#Mixed Model 
+```{r}
+##ratio
+model<- lmer(logRatio_RS ~SAT_C*treatment  + SAP_mm*treatment +cv*treatment + (1|population), data = bm2)
+
+summary(model)
+
+final<-lmer(logRatio_RS ~ SAT_C*treatment + SAP_mm + (1|population), data = bm2)
+
+summary(final)
+anova(final)
+r.squaredGLMM(final)
+
+##total biomass
+total_bm %>% ggplot(aes( x = Total_g)) + geom_density()
+model<- lmer(Total_g ~SAT_C*treatment  + SAP_mm*treatment +cv*treatment + (1|population), data = total_bm)
+
+summary(model)
+step(model)
+
+model<- lmer(Total_g ~ cv*treatment + (1|population), data = total_bm)
+anova(model)
+summary(model)
+r.squaredGLMM(model)
+
+
+
+```
+#AIC r:S
+```{r}
+m1<- lmer(logRatio_RS ~SAT_C*treatment  + SAP_mm*treatment +cv*treatment + (1|population), data = bm2)
+
+summary(m1)
+
+m2<- lmer(logRatio_RS ~SAT_C*treatment  + SAP_mm + cv*treatment + (1|population), data = bm2)
+
+summary(m2)
+
+m3<- lmer(logRatio_RS ~ SAT_C*treatment  + SAP_mm + cv + (1|population), data = bm2)
+
+summary(m3)
+
+m4<- lmer(logRatio_RS ~ SAT_C*treatment  + SAP_mm  + (1|population), data = bm2)
+
+summary(m4)
+
+AIC(m1,m2,m3,m4)
+
+```
+#AIC total biomass
+```{r}
+m1<- lmer(Total_g ~SAT_C*treatment  + SAP_mm*treatment +cv*treatment + (1|population), data = total_bm)
+summary(m1)
+
+m2<- lmer(Total_g ~SAT_C*treatment  + SAP_mm +cv*treatment + (1|population), data = total_bm)
+summary(m2)
+
+m3<- lmer(Total_g ~SAT_C  + SAP_mm +cv*treatment + (1|population), data = total_bm)
+summary(m3)
+
+m4<- lmer(Total_g ~SAT_C +cv*treatment + (1|population), data = total_bm)
+summary(m4)
+
+m5<- lmer(Total_g ~ cv*treatment + (1|population), data = total_bm)
+summary(m5)
+
+AIC(m1,m2,m3,m4,m5)
+```
+#Means 
+```{r}
+bm2 %>% group_by(population,treatment) %>% 
+  summarise(mean = mean(Ratio_RS), se = std.error(Ratio_RS)) 
+
+bm2 %>% count(population, treatment)
+
+bm2 %>% group_by(treatment) %>% 
+  summarise(mean = mean(Ratio_RS), se = std.error(Ratio_RS)) 
+
+bm2 %>% group_by(treatment, SAT_level) %>% 
+  summarise(mean = mean(Ratio_RS), se = std.error(Ratio_RS)) 
+
+bm2 %>% count( treatment)
+
+total_bm %>% group_by(population,treatment) %>% 
+  summarise(mean = mean(Total_g)*1000, se = std.error(Total_g)*1000) 
+
+bm2 %>% count(population, treatment)
+
+total_bm %>% group_by(treatment,cvlevel) %>% 
+  summarise(mean = mean(Total_g)*1000, se = std.error(Total_g)*1000) 
+
+total_bm %>% count(treatment)
+```
+#Graphs 
+```{r}
+#Ratio
+bm3<-bm2 %>% group_by(temp_cv, treatment) %>% 
+  summarise(mean = mean(logRatio_RS),
+            sd = sd(logRatio_RS), 
+            se = std.error(logRatio_RS))
+bm4<-full_join(bm3,climate_ID)
+
+b1<-bm4 %>% ggplot(aes(x = SAP_mm,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 2) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment',
+                    labels = c('Ambient' , 'Watered'),
+                    values =  c(2, 1)) +
+  scale_fill_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient', 'Watered')) +
+  xlab("Spring Precipiation (mm)") + 
+  ylab('Root:Shoot Ratio') + 
+  theme(legend.text = element_text(size = 8)) +
+  theme_classic()
+
+b2<-bm4 %>% ggplot(aes(x = SAT_C,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 2) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment',
+                    labels = c('Ambient' , 'Watered'),
+                    values =  c(2, 1)) +
+  scale_fill_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient', 'Watered')) +
+  xlab("Spring Temperature (C)") + 
+  ylab('Root:Shoot Ratio') + 
+  theme(legend.text = element_text(size = 8)) +
+  theme_classic() 
+
+#+ scale_y_log10() useful for transforming scale from log scale 
+
+#Total
+bm_total<-total_bm %>% group_by(temp_cv, treatment) %>% 
+  summarise(mean = mean(Total_g),
+          sd = sd(Total_g), 
+          se = std.error(Total_g))
+bm_total1<-full_join(bm_total,climate_ID)
+
+b3<-bm_total1 %>% ggplot(aes(x = cv, y = mean, 
+                             color = treatment, shape = treatment
+                             )) + 
+  geom_point(size = 2) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment',
+                    labels = c('Ambient' , 'Watered'),
+                    values =  c(2, 1)) +
+  scale_fill_manual(name = "Treatment",
+                    values = c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient', 'Watered')) +
+  xlab("Rainfall Variability (cv)") + 
+  ylab('Biomass (g)') + 
+  theme(legend.text = element_text(size = 8)) +
+  theme_classic()
+  
+  
+
+b4<-b1 + b2 + b3 + plot_layout(guides = 'collect')
+
+b4<-ggarrange(b1,b2,b3, nrow = 1, ncol = 3,common.legend = TRUE)
+
+##percent_changes 
+
+bm3<-bm2 %>% group_by(temp_cv, treatment) %>% 
+  summarise(mean = mean(Ratio_RS),
+            sd = sd(logRatio_RS), 
+            se = std.error(logRatio_RS))
+bm4<-full_join(bm3,climate_ID)
+
+```
+
+#biomass plasticity 
+```{r setup, include=FALSE}
+##plasticity
+rs_plas<-bm2 %>% group_by(population, treatment) %>% 
+  summarise(mean = mean(logRatio_RS)) %>%
+  pivot_wider(names_from = treatment,
+              values_from = mean) %>% 
+  mutate(plas = abs(nondrought-drought))
+
+rs_plas2<-bm2 %>% group_by(population, treatment) %>% 
+  summarise(mean = mean(logRatio_RS), 
+            se = std.error(logRatio_RS)) %>%
+ pivot_wider(names_from = treatment,
+              values_from = c(mean, se)) %>% 
+  mutate(plas = abs(mean_nondrought-mean_drought),
+         se_plas = (se_drought + se_nondrought) / 2)
+
+total_plas <- total_bm %>%group_by(population, treatment) %>% 
+  summarise(mean = mean(Total_g)) %>%
+  pivot_wider(names_from = treatment,
+              values_from = mean) %>% 
+  mutate(plas = abs(nondrought-drought))
+
+b<-full_join(total_plas, climate_ID)
+m<-lm(plas ~  cv , data = b)
+m1<-lm(plas ~  SAT_C , data = b)
+m2<-lm(plas ~  SAP_mm , data = b)
+
+a<-full_join(rs_plas, climate_ID)
+
+m<-lm(plas ~  cv , data = a)
+m1<-lm(plas ~  SAT_C , data = a)
+m2<-lm(plas ~  SAP_mm , data = a)
+
+summary(m1)
+summary(m2)
+summary(m)
+
+plot(residuals(m))
+qqnorm(residuals(m))
+
+plot(residuals(m1))
+qqnorm(residuals(m1))
+
+plot(residuals(m2))
+qqnorm(residuals(m2))
+
+a %>% ggplot(aes(x = SAT_C, y = plas)) + geom_point() + geom_smooth( method = 'lm')
+b %>% ggplot(aes(x = SAT_C, y = plas)) + geom_point()
+
+
+```
+
+```{r}
+
+a<-full_join(rs_plas2, climate_ID)
+plas<-a %>% ggplot(aes(x = SAT_C, y = plas, color = SAT_C)) + geom_point(size = 3) + 
+  geom_errorbar(aes(ymin=plas-se_plas, ymax=plas+se_plas), width=.01,
+                 position=position_dodge(0.05)) + 
+  geom_smooth(method = "lm", se = FALSE, color = "grey") + 
+  scale_color_gradient(low = "deepskyblue3", high = "darkorange1") + 
+  theme_classic() + 
+  xlab("Seed-Source Temperature (C)") + 
+  ylab("Root:Shoot Plasticity") + 
+  annotate('text', x = 19, y = .15, label = 'p = 0.03', size = 4) +
+  annotate('text', x = 19, y = .1, label = 'R2 = 0.40', size = 4) +
+  theme(panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5), 
+        legend.position = "none", 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20), 
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15))
+
+```

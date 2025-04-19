@@ -1,0 +1,1906 @@
+---
+title: "RQ1"
+author: "Zoe Klein"
+date: "2/21/2022"
+output: word_document
+---
+####Mortality 
+##Mortality Wrangle
+```{r setup, include=FALSE}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(lmerTest)
+library(forcats)
+library(plotrix)
+library(emmeans)
+library(ggpubr)
+library(patchwork)
+library(MuMIn)
+library(wesanderson)
+####Wrangle####
+mort_untidy<- read_excel("~/Documents/NAU/Thesis/Field/NMLC+common garden/RAW DATA/Garden_Data_102721.xlsx", 
+                         sheet = 1)
+
+mort_untidy <- read_excel("zoe code and data/ZOE_code + rawdata/Garden_Data_102721.xlsx")
+
+mort_untidy <- Garden_Data_102721
+
+mort_tidy<- mort_untidy %>% 
+  drop_na(Population_ID) %>% 
+  rename(population = Population_ID) %>% 
+  mutate(population = as.factor(population)) %>%
+  dplyr::select(-c(notes))
+
+#climate info
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.character(population)) %>%
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes))
+##joining data
+mort_clim<-inner_join(mort_tidy,climate_ID)
+##pivot data and make status binary 
+mort_clim_tidy<-mort_clim %>% 
+  pivot_longer(April_30:Aug_10, 
+               names_to = 'date',
+               values_to = 'status') %>%
+  mutate(status = if_else(status == 'DEAD', 0, 1))
+```
+
+#June 12th Mortality, before senescence, capturing treatment effects
+```{r}
+june_mort<-mort_clim_tidy %>% filter(date == 'June_12') %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         Treatment = as.factor(Treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon),
+         cv = as.numeric(cv))
+june_mort %>% ggplot(aes(x = status)) +geom_density() 
+
+```
+
+## Mort: First order models, mort ~ population*treatment 
+```{r}
+
+percent<-mort_clim_tidy %>% group_by(date, population,Treatment, cv_temp_mon) %>%
+  summarise(percent_live = mean(status)) %>% filter(date == "June_12") %>% 
+  mutate(percent_dead = 1-percent_live) 
+
+percent2<-inner_join(percent, climate_ID) %>% 
+  filter(date == "June_12")
+
+order1<-glmer(status ~ population + Treatment + (1|Plot), family = binomial(link = "logit"), data = june_mort,control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(order1)
+emm<- emmeans(order1, pairwise ~ population|Treatment)
+emm<- emmeans(order1, pairwise ~ Treatment|population)
+emm[["contrasts"]]
+
+order1<-glm(status ~ population + Treatment, family = binomial(link = "logit"), data = june_mort)
+summary(order1)
+
+library(betareg)
+library(multcomp)
+library(emmeans)
+
+model<-betareg(percent_live ~ Treatment + population, data=percent2)
+summary(model)
+emm<- emmeans(model, pairwise ~ population|Treatment)
+emmC<- emm[["contrasts"]]
+emmD<- emmeans(model, pairwise ~ Treatment | population)
+contrasts<-emmD[["contrasts"]]
+
+multcomp::cld(emm, alpha = 0.05, Letters = LETTERS)
+confint<-confint(model)
+```
+##MORT means and sd 
+```{r}
+june_mort %>% group_by(population,Treatment) %>% summarise(mean = mean(status),
+                                               sd = sd(status),
+                                               se = std.error(status),
+                                               n = sum(status))
+june_mort %>% mutate(ID = as.factor(ID)) %>%
+  group_by(population,Treatment) %>% summarise(n = n(ID))
+
+june_mort %>% group_by(cvlevel) %>% summarise(mean = mean(status),
+                                               sd = sd(status),
+                                               se = std.error(status),
+                                               n = sum(status))
+
+june_mort %>% count(Treatment)
+```
+
+## Mort: mixed model 
+```{r}
+m1<-glmer(status ~ Treatment + SAT_C*Treatment +  SAP_mm*Treatment + cv*Treatment +
+            (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m1)
+anova(m1)
+m2<-glmer(status ~ Treatment + cv +
+        (1|Plot/population) , family = binomial(link = "logit"),
+        data = june_mort,
+      control=glmerControl(optCtrl=list(maxfun=1e6), 
+                           optimizer = 'bobyqa'))
+summary(m2)
+anova(m2)
+AIC(m1, m2)
+r.squaredGLMM(m2)
+
+
+
+##having trouble here
+#confint.merMod(m2, method = 'profile')
+model<-betareg(percent_live ~ cv + Treatment, data=percent2)
+
+#confint(model)
+m2<-glmer(status ~ Treatment + cv +
+        (1|Plot/population) , family = binomial(link = "logit"),
+        data = june_mort)
+confint(model)
+
+##with 9 and 3 excluded still a negative relationship, but no longer sig
+exclude<-june_mort %>% filter(population != c('3', '9'))
+mex<-glmer(status ~ Treatment + cv +
+        (1|Plot/population) , family = binomial(link = "logit"),
+        data = exclude,
+      control=glmerControl(optCtrl=list(maxfun=1e6), 
+                           optimizer = 'bobyqa'))
+summary(mex)
+
+```
+#AIC
+```{r}
+m1<-glmer(status ~ Treatment + SAT_C*Treatment +  SAP_mm*Treatment + cv*Treatment +
+            (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m1)
+
+m2<-glmer(status ~ Treatment + SAT_C*Treatment +  SAP_mm + cv*Treatment + (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m2)
+
+m3<-glmer(status ~ Treatment + SAT_C*Treatment +  SAP_mm + cv + (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m3)
+
+m4<-glmer(status ~ Treatment + SAT_C*Treatment + cv + (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m4)
+
+m5<-glmer(status ~ Treatment + SAT_C + cv + (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m5)
+
+m6<-glmer(status ~ Treatment +  cv + (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                              optimizer = 'bobyqa'))
+summary(m6)
+
+AIC(m1,m2,m3,m4,m5,m6)
+
+
+anova(m1,m6, test = "Chisq")
+```
+##Mort Graphs
+```{r}
+#normalized rxn graphs
+percent3<-mort_clim_tidy %>% group_by(population, Treatment) %>% 
+  summarise(percent_live = mean(status),sd = sd(status),
+            se = std.error(status))
+percent3.1<- percent3 %>% group_by(Treatment) %>% summarize(groupmean = mean(percent_live),
+                                                            groupsd = sd(percent_live))
+percent4<-full_join(percent3,climate_ID)
+percent5<- full_join(percent4, percent3.1)
+percent6<-full_join(percent5,climate_ID)
+percent5 %>% mutate(normalized_live = (percent_live - groupmean)/groupsd, 
+                    temp_cv = as.factor(temp_cv))
+
+p0<-percent5 %>% mutate(population = as.factor(population)) %>%
+  mutate(population = fct_relevel(population, "1","2","3","4",
+                             "5","6","7","8","9","10",
+                             "11","12" )) %>%
+  ggplot(aes(x = reorder(Treatment, desc(Treatment)),
+                         y = (percent_live-groupmean)/groupsd, 
+                         group = population, color = population)) +
+  ylab('Relative Survival') + 
+  xlab("Treatment") +
+  labs(color = "Population") +
+  scale_color_manual(values = wes_palette("Darjeeling1", n = 12, type = "continuous")) +
+  geom_line(position = position_dodge(width = .3)) + 
+  #geom_errorbar(aes(ymin=percent_live-se,ymax=percent_live+se,width=0), position = position_dodge(width = .3)) +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2) +
+  theme_bw() + facet_grid(temp~cvlevel)
+
+pa<-percent5 %>% mutate(population = as.factor(population)) %>%
+  ggplot(aes(x = reorder(Treatment, desc(Treatment)),
+                         y = (percent_live-groupmean)/groupsd, 
+                         group = population, color = cvlevel)) +
+  ylab('Relative Survival') + 
+  xlab("Treatment") +
+  labs(color = "Rainfall variability (cv)") + 
+  scale_color_manual(values= c("darksalmon", "darkseagreen4"),
+                     labels = c('High variability' , 'Low variability')) +
+  geom_line(position = position_dodge(width = .3))  +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2) +
+  theme_classic() + facet_grid(~cvlevel) + 
+  theme(legend.position = "none",
+        axis.title.x = element_text(size = 15), 
+        axis.title.y = element_text(size = 15), 
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+
+#rxn norm diff between populations 
+percent3<-mort_clim_tidy %>% group_by(population, Treatment) %>% 
+  summarise(percent_live = mean(status),sd = sd(status),
+            se = std.error(status))
+percent4<-full_join(percent3,climate_ID)
+
+p1<-percent4 %>% ggplot(aes(x = reorder(Treatment,desc(Treatment)), y = percent_live, group = temp_cv, color = cv)) +
+  ylab('Survival (%)') + 
+  xlab("Treatment") +
+  labs(color = "Rainfall Variability (cv)") +
+  geom_line( position = position_dodge(width = .3))+
+  geom_errorbar(aes(ymin=percent_live-se,ymax=percent_live+se,width=0), position = position_dodge(width = .3)) +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2) + scale_color_gradient(low = "blue",  high = 'orange') +
+  theme_bw() 
+
+facet_labs<- c('Northern', 'Southern')
+p1 + facet_wrap(~ cvlevel)
+
+p2<-percent4 %>% ggplot(aes(x = reorder(Treatment,desc(Treatment)), y = percent_live, group = temp_cv, color = temp_cv)) +
+  ylab('Survival (%)') + 
+  xlab("Treatment") +
+  labs(color = "Rainfall Variability (cv)") +
+  geom_line( position = position_dodge(width = .3))+
+  geom_errorbar(aes(ymin=percent_live-se,ymax=percent_live+se,width=0), position = position_dodge(width = .3)) +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2)  +
+  theme_bw() 
+p2 + facet_wrap(~cvlevel)
+
+#linear mixed model graphs
+percent_live<-mort_clim_tidy %>% 
+  group_by(date, population,Treatment, cv_temp_mon) %>%
+  summarise(percent_live = mean(status),
+            se = std.error(status)) %>% filter(date == "June_12") %>% 
+  mutate(percent_dead = 1-percent_live) 
+percent_live2<-inner_join(percent_live, climate_ID) %>% 
+  filter(date == "June_12")
+#cv
+p2<-percent_live2 %>% ggplot(aes(x = cv , y = percent_live,color = Treatment, group = Treatment)) + 
+  geom_point(aes(shape = Treatment))  + 
+  geom_smooth(aes(linetype = Treatment, color = Treatment), method = 'lm') +
+  scale_linetype_manual(values=c("twodash", "solid"),
+                        labels = c('Ambient' , 'Watered')) +
+  xlab("Home Rainfall Variability (cv)") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(values=c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  labs(linetype = 'Treatment') + 
+  theme(legend.text = element_text(size = 8)) + theme_classic()
+
+#cv
+
+mort_cv<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100, color = Treatment))+ 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_live - se , ymax = percent_live + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home rainfall variability (cv)") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+ # annotate('text', x = 40, y = 100, label = '**', size = 6) +
+ #annotate('text', x = 40, y = 95, label = 'R2c = 0.24', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = "none")
+
+mort_cv
+
+```
+##Flowering Wrangle
+```{r}
+flower_untidy<- read_excel("~/Documents/NAU/Thesis/Field/NMLC+common garden/RAW DATA/most recent/Seed_Cleaning_12622.xlsx", 
+                           sheet = 1)
+flower_tidy<-flower_untidy %>% 
+  mutate(Population_ID = as.factor(Population_ID)) %>% 
+  rename(population = Population_ID)
+
+## adding climate data
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.factor(population)) %>%
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes)) %>% 
+  mutate(SAP_level = ifelse(SAP_mm >40, "wet","dry"),
+         SAT_level = ifelse(SAT_C >16.6, "hot","cool"))
+##joining together with the climate data stuff so I can do some visualizing graphing
+flower_clim<-inner_join(flower_tidy,climate_ID) %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         Treatment = as.factor(Treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon),
+         Flowering = as.factor(Flowering)) %>%
+  mutate(Flowering = if_else(Flowering == 'Y', 1, 0)) #1 means yes flowering 
+
+
+## Proportions flowering 
+percent<-flower_clim %>% group_by(population,Treatment, cv_temp_mon) %>%
+  summarise(percent_flower = mean(Flowering),
+            sd_flower = sd(Flowering), 
+            se = std.error(Flowering)) %>% 
+  mutate(percent_noflower = 1-percent_flower) 
+percent_flow<-inner_join(percent, climate_ID) 
+```
+##FLO + MORT 
+```{r}
+flomort<-full_join (percent_flow, percent2)
+flomort %>% ggplot(aes(x = percent_flower, y = percent_dead, color = Treatment)) + geom_point()+ geom_smooth(method = 'lm')
+```
+##Flo: First Order
+```{r}
+(library(betareg))
+model1<-betareg(percent_flower ~Treatment+population, data = percent_flow)
+summary(model1)
+
+order1<-glm(Flowering ~ population + Treatment,family = binomial(link = "logit"), data = flower_clim)
+summary(order1)
+anova(order1)
+```
+##Flo:means and sd
+```{r}
+flower_clim %>% group_by(population,Treatment) %>% 
+  summarise(mean = mean(Flowering),se = std.error(Flowering))
+
+flower_clim %>% group_by(Treatment) %>% 
+  summarise(mean = mean(Flowering),se = std.error(Flowering),
+            n = sum(Flowering))
+
+flower_clim %>% count(Treatment)
+
+flower_clim %>% group_by(SAP_level) %>% 
+  summarise(mean = mean(Flowering),se = std.error(Flowering))
+
+flower_clim %>% 
+  group_by(SAT_level) %>% 
+  summarise(mean = mean(Flowering),se = std.error(Flowering))
+
+```
+##Flo: Mixed Model
+```{r}
+scaled <- transform(flower_clim,
+                    SAP_mm=scale(SAP_mm),
+                    SAT_C=scale(SAT_C),
+                    cv = scale(cv)) 
+
+
+order1<-glmer(Flowering ~ population*Treatment + 
+                (1|Plot), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+
+summary(order1)
+m1_sc<-glmer(Flowering ~ SAT_C*Treatment + SAP_mm*Treatment + cv*Treatment + 
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+
+final<-glmer(Flowering ~ SAT_C   + SAP_mm  +
+                (1|Plot/population), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), 
+             data =scaled)
+
+
+summary(m1_sc)
+summary(final)
+anova(final)
+
+##r values 
+f1<-glmer(Flowering ~ SAT_C +
+                (1|Plot/population), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), 
+             data =scaled)
+f2<-glmer(Flowering ~ SAP_mm +
+                (1|Plot/population), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), 
+             data =scaled)
+r.squaredGLMM(f1) 
+r.squaredGLMM(f2)
+r.squaredGLMM(final)##issue here 
+```
+#AIC
+```{r}
+m1<-glmer(Flowering ~ SAT_C*Treatment + SAP_mm*Treatment + cv*Treatment + 
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m1)
+
+m2<-glmer(Flowering ~ SAT_C*Treatment + SAP_mm*Treatment + cv + 
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m2)
+
+m3<-glmer(Flowering ~ SAT_C*Treatment + SAP_mm + cv + 
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m3)
+
+m4<-glmer(Flowering ~ Treatment + SAT_C + SAP_mm + cv + 
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m4)
+
+m5<-glmer(Flowering ~ Treatment + SAT_C + SAP_mm +
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m5)
+m6<-glmer(Flowering ~  SAT_C + SAP_mm +
+                (1|Plot/cv_temp_mon), family = binomial(link = "logit"), 
+             control = glmerControl(optimizer ="bobyqa",
+                                    optCtrl=list(maxfun=1e6)), data = scaled)
+summary(m6)
+AIC(m1,m2,m3,m4,m5,m6)
+
+anova(m1,m6, test = "Chisq")
+```
+
+##Flo: Graphs 
+```{r}
+#SAT
+
+flo_sat<-percent_flow %>% ggplot(aes(x = SAT_C, y = percent_flower*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flower - se , ymax = percent_flower + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring temperature (C)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  #annotate('text', x = 19, y = 8, label = '***', size = 6) +
+  #annotate('text', x = 19, y = 16, label = 'R2c = 0.15', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = c(.9,.9))
+#SAP
+flo_sap<-percent_flow %>% ggplot(aes(x = SAP_mm, y = percent_flower*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flower - se , ymax = percent_flower + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring Rainfall (mm)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  #annotate('text', x = 62, y = 8, label = '***', size = 6) +
+  #annotate('text', x = 62, y = 16, label = 'R2c = 0.15', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none')
+
+flo_sap
+
+percent_flow %>% ggplot(aes(x = cv , y = percent_flower)) + 
+  geom_point()  + 
+  geom_smooth(method = 'lm', color = "black") +
+  scale_linetype_manual(values=c("twodash", "solid"),
+                        labels = c('Ambient' , 'Watered')) +
+  # ggtitle("Survival by Home Rainfall Variability") + 
+  xlab("Home Rainfall amount (mm)") + 
+  ylab('Flowered (%)') + 
+  labs(linetype = 'Treatment') + 
+  theme(legend.text = element_text(size = 8)) + theme_classic()
+
+percent_flow %>% ggplot(aes(x = SAT_C , y = percent_flower)) + 
+  geom_point()  + 
+  geom_smooth(method = 'lm', color = "black") +
+  scale_linetype_manual(values=c("twodash", "solid"),
+                        labels = c('Ambient' , 'Watered')) +
+  # ggtitle("Survival by Home Rainfall Variability") + 
+  xlab("Home Rainfall amount (mm)") + 
+  ylab('Flowered (%)') + 
+  labs(linetype = 'Treatment') + 
+  theme(legend.text = element_text(size = 8)) + theme_classic()
+
+##Rxn norms
+percent2<-flower_clim %>% group_by(population,Treatment, cv_temp_mon) %>%
+  summarise(percent_flower = mean(Flowering),
+            sd = sd(Flowering), 
+            se= std.error(Flowering)) %>% 
+  mutate(percent_noflower = 1-percent_flower)
+percent3<-full_join(percent2,flower_clim)
+
+pflow<-percent3 %>% 
+  ggplot(aes(x = reorder(Treatment,desc(Treatment)), y = percent_flower, color = cv, 
+             group = temp_cv)) + 
+  ylab('Flowered (%)') + 
+  xlab("Treatment") +
+  labs(color = "Rainfall Variability (cv)") +
+  geom_errorbar(aes(ymin=percent_flower-se,ymax=percent_flower+se,width=0),
+                    position = position_dodge(width = .3)) +
+  geom_line(position = position_dodge(width = .3)) +
+  geom_point(position = position_dodge(width = .3), shape=21,size=2) + 
+  scale_color_gradient(low = "blue",  high = 'orange') +
+  theme_bw() 
+pflow2<-percent3 %>% 
+  ggplot(aes(x = reorder(Treatment,desc(Treatment)), y = percent_flower, color = temp_cv, 
+             group = temp_cv)) + 
+  ylab('Flowered (%)') + 
+  xlab("Treatment") +
+  labs(color = "Rainfall Variability (cv)") +
+  geom_errorbar(aes(ymin=percent_flower-se,ymax=percent_flower+se,width=0),
+                    position = position_dodge(width = .3)) +
+  geom_line(position = position_dodge(width = .3)) +
+  geom_point(position = position_dodge(width = .3), shape=21,size=2) + 
+  theme_bw() 
+
+pflow2 + facet_wrap(~cvlevel)
+
+#normalized rxn graphs
+flo1<-flower_clim %>% group_by(population, Treatment) %>% 
+  summarise(percent_flo = mean(Flowering),sd = sd(Flowering),
+            se = std.error(Flowering))
+flow1.1<- flo1 %>% group_by(Treatment) %>% 
+  summarize(groupmean = mean(percent_flo),
+            groupsd = sd(percent_flo))
+flo2<-full_join(flo1,climate_ID)
+flow3<- full_join(flo2,flow1.1)
+
+clim2<-climate_ID %>% mutate(SAP_level = 
+                               ifelse(SAP_mm > 53.5, "Wet",
+                                      ifelse(SAP_mm < 30,"Dry", "Mid")))
+clim2<-climate_ID %>% mutate(SAP_level = 
+                               ifelse(SAP_mm >40, "Wet","Dry"))
+flow4<-full_join(clim2, flow3)
+p0.0<-flow4 %>% mutate(population = as.factor(population)) %>%
+  ggplot(aes(x = reorder(Treatment, desc(Treatment)),
+                         y = (percent_flo-groupmean)/groupsd, 
+                         group = population, color = SAP_level)) +
+  ylab('Relative Flowering') + 
+  xlab("Treatment") +
+  labs(color = "Home Mean Annual Rainfall") + 
+ scale_color_manual(values= c("darksalmon", "darkseagreen4"),
+                  labels = c('Dry' , 'Wet')) +
+  geom_line(position = position_dodge(width = .3))  +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2) +
+  theme_bw() + facet_grid(~SAP_level) +
+  theme(legend.position="none")
+
+ clim3<-climate_ID %>% mutate(SAT_level = 
+                               ifelse(SAT_C > 16.6, "Hot","Cool"),
+                              SAP_level = 
+                               ifelse(SAP_mm > 40, "Wet","Dry"))
+flow5<-full_join(clim3, flow3)
+p0.1<-flow5 %>%mutate(population = as.factor(population)) %>%
+  mutate(population = fct_relevel(population, "1","2","3","4",
+                             "5","6","7","8","9","10",
+                             "11","12" ))  %>%
+  ggplot(aes(x = reorder(Treatment, desc(Treatment)),
+                         y = (percent_flo-groupmean)/groupsd, 
+                         group = population, color = population)) +
+  ylab('Relative Flowering') + 
+  xlab("Treatment") +
+  labs(color = "population") + 
+  scale_color_manual(values = wes_palette("Darjeeling1", n = 12, type = "continuous")) +
+  geom_line(position = position_dodge(width = .3))  +
+  geom_point(position = position_dodge(width = .3),shape=21,size=2) +
+  theme_bw() + facet_grid(temp~cvlevel, scales = "free_x", space = "free_x") +
+  expand_limits(x = 0.25) + 
+  theme(legend.position="none")
+
+rxn<-(p0.1/p0) + plot_layout(guides = 'collect') 
+demo<-((flo_sap + flo_sat) / mort_cv) + plot_layout(guides = 'collect')
+```
+##SLA Garden Wrangle
+```{r}
+####Wrangling####
+#Data Cleaning
+SLA_garden_untidy <- read_excel("~/Documents/NAU/Thesis/Field/NMLC+common garden/RAW DATA/SLA_garden61421.xlsx")
+
+SLA_garden_tidy<-SLA_garden_untidy %>% 
+  drop_na(Dry_weight_5lvs, LeafArea_5lvs) %>%
+  mutate(SLA = as.numeric(SLA), 
+         Avg_dryweight_g = as.numeric(Avg_dryweight_g)) %>%
+  rename(population = Population_ID) %>%
+  mutate(population = as.character(population))
+
+## adding climate data
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.factor(population)) %>%
+dplyr::select(-c(notes)) %>%
+rename(temp = ...9) %>% 
+  mutate(SAP_level = ifelse(SAP_mm >40, "wet","dry"),
+         SAT_level = ifelse(SAT_C >16.6, "hot","cool"))
+##joining together with the climate data stuff so I can do some visualizing graphing
+SLA_garden_clim<-inner_join(SLA_garden_tidy,climate_ID) %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         Treatment = as.factor(Treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon))
+
+##removing outliers
+SLA_1<-SLA_garden_clim %>% 
+  filter(log(SLA) > 4) %>%
+  filter(log(SLA) < 5.3) %>% 
+  mutate(LogSLA = log(SLA))
+
+```
+##SLACG means and SD
+```{r}
+SLA_1 %>% group_by(population,Treatment) %>% 
+  summarise(mean = mean(SLA), se = std.error(SLA))
+
+SLA_1 %>% count(population,Treatment)
+
+SLA_1 %>% group_by(Treatment) %>% 
+  summarise(mean = mean(SLA), se = std.error(SLA))
+
+SLA_1 %>% count(Treatment)
+
+SLA_1 %>% group_by(SAP_level, Treatment) %>% 
+  summarise(mean = mean(SLA), se = std.error(SLA))
+
+```
+#SLACG: First order
+```{r}
+model<-lm(LogSLA ~ Treatment* population, data = SLA_1)
+model<-lm(LogSLA ~ Treatment + population, data = SLA_1)
+summary(model)
+anova(model)
+emm<- emmeans(model, pairwise ~ population|Treatment)
+emmC<- emm[["contrasts"]]
+letters<-multcomp::cld(emm, alpha = 0.05, Letters = LETTERS)
+```
+#SLACG: Mixed Model
+```{r}
+m<-lmer(LogSLA ~ SAP_mm*Treatment + cv*Treatment + SAT_C*Treatment +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+
+performance::check_collinearity(m)
+summary(m)
+final<- lmer(LogSLA ~ Treatment + SAP_mm + cv + (1|Plot/temp_cv) , data= SLA_1)
+final2<- lmer(LogSLA ~ Treatment + SAP_mm + (1|Plot/temp_cv)  , data= SLA_1)
+summary(final)
+summary(final2)
+
+r.squaredGLMM(final2)
+```
+#AIC 
+```{r}
+m1<-lmer(LogSLA ~ SAP_mm*Treatment + cv*Treatment + SAT_C*Treatment +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+summary(m1)
+
+
+m2<-lmer(LogSLA ~ SAP_mm + cv*Treatment + SAT_C*Treatment +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+summary(m2)
+
+m3<-lmer(LogSLA ~ SAP_mm + cv*Treatment + SAT_C +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+summary(m3)
+
+m4<-lmer(LogSLA ~ SAP_mm + cv + Treatment + SAT_C +
+           (1|Plot/cv_temp_mon), data= SLA_1 )
+summary(m4)
+
+m5<-lmer(LogSLA ~ SAP_mm + cv + Treatment  +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+summary(m5)
+
+m6<-lmer(LogSLA ~ SAP_mm  + Treatment  +
+           (1|Plot/cv_temp_mon), data= SLA_1)
+summary(m6)
+
+AIC(m1,m2,m3,m4,m5,m6)
+
+anova(m1, m6, test= "Chisq")
+```
+#SLACG: Graphs
+```{r}
+SLA_3<-SLA_1 %>% group_by(temp_cv, Treatment) %>% 
+  summarise(mean = mean(LogSLA),
+                                                        sd = sd(LogSLA), 
+                                                        se = std.error(LogSLA))
+SLA_3<-full_join(SLA_3,climate_ID)
+
+sla_SAP<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean, color = Treatment)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring precipitation (mm)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+#  annotate('text', x = 67, y = 8, label = '***', size = 6) +
+ # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+sla_SAP
+
+
+############ non-log scale
+############
+SLA_3.0<-SLA_1 %>% group_by(population, Treatment) %>% 
+  summarise(mean = mean(SLA),
+            sd = sd(SLA),
+            se = std.error(SLA))
+SLA_3.0<-full_join(SLA_3.0,climate_ID)
+
+sla_SAP2<-SLA_3.0 %>% ggplot(aes(x = SAP_mm, y = mean, color = Treatment)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring precipitation (mm)") + 
+  ylab('Specific Leaf Area (g/cm2)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+#  annotate('text', x = 67, y = 8, label = '***', size = 6) +
+ # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+```
+##SLA GreenH Wrangle
+```{r}
+####Wrangle####
+SLA_untidy<-read.csv("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/SLA_8521.csv")
+
+SLA_tidy<-SLA_untidy %>%
+  drop_na(c('Leaf_Mass_g','SLA')) %>%
+  mutate('SLA_r' = Leaf_Area_cm2/Avg_Leaf_Mass_g) %>%
+  dplyr::select(-c('SLA')) %>%
+  mutate_at(7, round, 2) %>%
+  mutate(population = as.factor(population))
+
+#### now I am going to add the climate components (i.e. wet-predictable IDier)
+##adding another ID table with all climate info to join with the biomass_tidy table 
+
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.character(population)) %>%
+  dplyr::select(-c(notes)) %>%
+  rename(temp = ...9)
+##joining together with the climate data 
+SLA_clim<-inner_join(SLA_tidy,climate_ID) %>% # select(-c(notes)) %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         treatment = as.factor(treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon))
+##visual 
+SLA_clim %>% 
+  filter(SLA_r <250) %>%
+  ggplot() + 
+  geom_violin(aes(x = cv_temp_mon, y = SLA_r, fill = temp)) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  facet_grid(~treatment)
+
+SLA_clim1<- SLA_clim %>%
+  filter(SLA_r <250) %>% 
+  mutate(LogSLA = log(SLA_r))
+
+```
+#SLAGH:First Order
+```{r}
+model<-lm(LogSLA ~ treatment*population, data = SLA_clim1)
+summary(model)
+
+emm<- emmeans(model, pairwise ~ population|treatment)
+emmC<- emm[["contrasts"]]
+
+multcomp::cld(emm, alpha = 0.05, Letters = LETTERS)
+```
+
+```{r}
+SLA_clim1 %>% group_by(population,treatment) %>% 
+  summarise(mean = mean(SLA_r), se = std.error(SLA_r)) 
+
+SLA_clim1 %>% count(population, treatment)
+
+SLA_clim1 %>% group_by(cvlevel) %>% 
+  summarise(mean = mean(SLA_r), se = std.error(SLA_r)) 
+
+SLA_clim1 %>% count(treatment)
+```
+#SLAGH:Mixed Model
+```{r}
+model<-lmer(LogSLA ~ SAT_C*treatment + cv*treatment + SAP_mm*treatment + 
+               (1|cv_temp_mon), data = SLA_clim1)
+summary(model)
+
+model1<-lmer(LogSLA ~ SAT_C +  cv +  (1|cv_temp_mon), data = SLA_clim1)
+step(model)
+summary(model1)
+anova(model1)
+
+####Model Assessment #####
+plot(model1)
+qqnorm(residuals(model1))
+qqline(residuals(model1))
+
+##remove outliers to fix heteroskedacity 
+cooksD <- cooks.distance(model1)
+influential <- cooksD[(cooksD > (3 * mean(cooksD, na.rm = TRUE)))]
+names_of_influential <- names(influential) ##removed 74 outliers
+outliers <- SLA_clim1[names_of_influential,]#summary stats about outliers 
+SLA_clim2 <- SLA_clim1 %>% anti_join(outliers) #rejoin with new data frame
+
+model<-lmer(LogSLA ~ SAT_C*treatment + cv*treatment + SAP_mm*treatment + 
+               (1|cv_temp_mon), data = SLA_clim2)
+final<-lmer(LogSLA ~ SAT_C +  cv +  (1|cv_temp_mon), data = SLA_clim2)
+
+summary(final)
+####Model Assessment #####
+plot(final)
+qqnorm(residuals(final))
+
+r.squaredGLMM(final)
+
+```
+#AIC
+```{r}
+m1<-lmer(LogSLA ~ SAT_C*treatment + cv*treatment + SAP_mm*treatment + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m1)
+
+m2<-lmer(LogSLA ~ SAT_C*treatment + cv + SAP_mm*treatment + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m2)
+
+m3<-lmer(LogSLA ~ SAT_C*treatment + cv + SAP_mm + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m3)
+
+m4<-lmer(LogSLA ~ SAT_C + treatment + cv + SAP_mm + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m4)
+
+m5<-lmer(LogSLA ~ SAT_C + cv + SAP_mm + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m5)
+
+m6<-lmer(LogSLA ~ SAT_C + cv + 
+               (1|cv_temp_mon), data = SLA_clim2)
+summary(m6)
+
+AIC(m1, m2, m3,m4,m5,m6)
+
+anova(m1, m6, test = "ChiSq")
+
+confint(m6)
+```
+##SLAGH:Graphs
+```{r}
+
+SLA_4<-SLA_clim2 %>% group_by(temp_cv, treatment) %>% summarise(mean = mean(LogSLA),
+                                                        sd = sd(LogSLA), 
+                                                        se = std.error(LogSLA))
+SLA_4<-full_join(SLA_4,climate_ID)
+
+sla_SAT_GH<-SLA_4 %>% ggplot(aes(x = SAT_C, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring Temperature (mm)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  # annotate('text', x = 67, y = 8, label = '***', size = 6) +
+  # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+sla_SAT_GH
+
+sla_cv_GH<-SLA_4 %>% ggplot(aes(x = cv, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home rainfall variability (cv)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+#  annotate('text', x = 67, y = 8, label = '***', size = 6) +
+ # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+
+sla_cv_GH
+
+
+######################## back transformed! 
+########################
+
+SLA_4.0<-SLA_clim2 %>% group_by(temp_cv, treatment) %>%
+  summarise(mean = mean(SLA_r),
+            sd = sd(SLA_r),
+            se = std.error(SLA_r))
+SLA_4.0<-full_join(SLA_4.0,climate_ID)
+
+sla_SAT_GH2<-SLA_4.0 %>% ggplot(aes(x = SAT_C, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Spring Temperature (mm)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  # annotate('text', x = 67, y = 8, label = '***', size = 6) +
+  # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+sla_SAT_GH2
+
+sla_cv_GH2<-SLA_4.0 %>% ggplot(aes(x = cv, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 2) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home rainfall variability (cv)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+#  annotate('text', x = 67, y = 8, label = '***', size = 6) +
+ # annotate('text', x = 67, y = 16, label = 'R2c = ', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = 'none') 
+
+sla_cv_GH2
+```
+#SLA: CG v GH
+```{r}
+library(ggpubr)
+GH<-SLA_clim2 %>% mutate( population = fct_relevel(population, 
+                                   '1', '2','3','4' ,'5',
+                                   '6', '7','8','9' ,'10','11'
+                                   ,'12') ) %>%
+  ggplot(aes(x = population, y = SLA_r, color = treatment)) + 
+  geom_boxplot() + 
+  xlab("Population") + 
+  ylab('Specific Leaf Area (g/cm²)') + 
+  ylim(25,250) +
+  scale_color_manual(values=c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  labs(color = 'Treatment') + 
+  theme(legend.text = element_text(size = 8)) +
+  theme_classic() +
+  theme(axis.title.y = element_blank(),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        axis.title.x = element_text(size = 15))
+
+CG<-SLA_1 %>% 
+  mutate( population = fct_relevel(population, 
+                                   '1', '2','3','4' ,'5',
+                                   '6', '7','8','9' ,'10','11'
+                                   ,'12') ) %>%
+  ggplot(aes(x = population, y = SLA, color = Treatment)) + 
+  geom_boxplot() + 
+  xlab("Population") + 
+  ylab('Specific Leaf Area (g/cm²)') + 
+  ylim(25,250)+
+  scale_color_manual(values=c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  labs(color = 'Treatment') + 
+  theme(legend.text = element_text(size = 8)) +
+  theme_classic() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+
+#a is common garden, #b is greenhouse
+sla<-CG/GH + plot_layout (guides = 'collect') + plot_annotation(tag_levels = "a")
+
+##mean SLA for drought and non drought in both experiments across all populations 
+SLA_1 %>% group_by(Treatment, population) %>% summarize(mean = mean(LogSLA))
+SLA_clim2 %>% group_by(treatment, population) %>% summarize(mean = mean(LogSLA))
+```
+
+#Full Graph of all variables 
+```{r} 
+## all graphs
+
+#mort 
+mort1<- mort_cv + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                        axis.text.x = element_blank(),
+                         axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#flowering
+flo1<-flo_sap + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                      axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+flo2<-flo_sat+ theme(axis.text.x  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                      axis.text.y = element_text(size =12),
+                      axis.title.y = element_text(size =15),
+                      legend.position = "none",
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# garden SLA
+sla_1<-sla_SAP2+ theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                       axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#greenhouse SLA
+sla_2<-sla_SAT_GH2 + theme(axis.title.x  = element_blank(),
+                          axis.text.x  = element_blank(),
+                           axis.title.y = element_text(size =15),
+                           axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+                    ylab('SLA'~(g/cm^2))
+  
+                
+        
+sla_3<-sla_cv_GH2 + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                        axis.text.x  = element_blank(),
+                        axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# total biomass
+bm3<-b3 + theme(axis.title.y  = element_blank(),
+                 axis.title.x = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  xlab('Rainfall Variability (cv)')#CV
+#root to shoot 
+bm1<-b1 + theme(axis.title.y  = element_blank(),
+                axis.title.x  = element_blank(),
+                axis.text.y = element_blank(),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))#SAP
+
+bm2<-b2 + theme(axis.title.x  = element_blank(),
+                 axis.title.y = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  ylab('Root:Shoot')#SAT
+
+
+
+empty_sla_sap<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+generic_empty<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_mort<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100)) +
+  ylab('Survival (%)') +
+  theme_classic() +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+
+empty_sla_CG<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab(('SLA'~(g/cm^2))) +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_TB<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab('Total Biomass (g)') +
+  xlab('Temperature (C)') +
+  theme(axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") 
+
+generic_empty_SAP<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+         axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") + 
+  xlab('Precipitation (mm)')
+
+f1<-(empty_mort + generic_empty + mort1)/ #mort
+  (flo2 + flo1 + generic_empty) / #flowering
+  (empty_sla_CG + sla_1 + generic_empty) / #sla_garden
+  (sla_2 + empty_sla_sap + sla_3) / #sla_greenhouse
+  (bm2 + bm1 + generic_empty ) / #rs
+  (empty_TB + generic_empty_SAP + bm3) + #biomass total
+  plot_layout(widths = c(1,1), 
+              guides = 'collect')  
+
+```
+#Defense Graphs
+
+```{r}
+#RQ1
+#mortality
+mort<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100, color = Treatment))+ 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_live - se , ymax = percent_live + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Rainfall Variability (cv)") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 40, y = 100, label = 'p < 0.01', size = 4) +
+  annotate('text', x = 40, y = 95, label = 'R2m = 0.09, R2c = 0.24', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12), 
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12))
+
+mort
+
+#flowering
+
+#SAT
+flower2<-percent_flow %>% ggplot(aes(x = SAT_C, y = percent_flower*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flower - se , ymax = percent_flower + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Temperature (C)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 19, y = 12, label = 'p < 0.001', size = 4) +
+  annotate('text', x = 19, y = 16, label = 'R2m = 0.05, R2c = 0.17', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) #saved as flower2_presentation
+
+#SAP
+flower1<-percent_flow %>% ggplot(aes(x = SAP_mm, y = percent_flower*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flower - se , ymax = percent_flower + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Precipitation (mm)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 62, y = 13, label = 'p < 0.001', size = 4) +
+  annotate('text', x = 62, y = 16, label = 'R2m = 0.05, R2c = 0.17', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12))
+
+flower1 #saved as flower1_presentation
+
+#SLA garden 
+sla1<-SLA_3.0 %>% ggplot(aes(x = SAP_mm, y = mean, color = Treatment)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'lm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Precipitation (mm)") + 
+  ylab('Specific Leaf Area' ~(cm^2/g)) + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 63, y = 87, label = 'p < 0.01', size = 4) +
+  annotate('text', x = 63, y = 93, label = 'R2m = 0.07, R2c = 0.41', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+sla1 #slaCG1_presentation
+
+## SLA GREENHOUSE
+
+sla_2<-SLA_4.0 %>% ggplot(aes(x = SAT_C, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 3) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Temperature (mm)") + 
+  ylab('Specific Leaf Area' ~(cm^2/g)) + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 19, y = 140, label = 'p < 0.01', size = 4) +
+  annotate('text', x = 19, y = 150, label = 'R2m=0.22, R2c=0.36', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+sla_2 #slaGH2_presentation
+
+sla_3<-SLA_4.0 %>% ggplot(aes(x = cv, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 3) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Seed-Source Rainfall Variability (cv)") + 
+  ylab('Specific Leaf Area' ~(cm^2/g)) + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 37, y = 150, label = 'R2m = 0.22, R2c = 0.36', size = 4) +
+  annotate('text', x = 37, y = 140, label = 'p < 0.05', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+
+sla_3 #slaGH3_presentation
+
+#biomass 
+biomass<-bm_total1 %>% ggplot(aes(x = cv, y = mean*100, 
+                             color = treatment, shape = treatment
+                             )) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+ scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Seed-Source Rainfall Variability (cv)") + 
+  ylab('Biomass (mg)') + 
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 39, y = 3.5, label = 'R2m = 0.22, R2c = 0.28', size = 4) +
+  annotate('text', x = 39, y = 3.2, label = 'p < 0.05', size = 4) +
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+biomass #biomass1
+
+#rs 
+biomass2<-bm4 %>% ggplot(aes(x = SAP_mm,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Seed-Source Precipitation (mm)") + 
+  ylab('Root:Shoot Ratio') + 
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 62, y = .7, label = 'R2m = 0.28, R2c = 0.48', size = 4) +
+  annotate('text', x = 62, y = .6, label = 'p < 0.05', size = 4) +
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+  
+biomass2 #biomass2
+
+biomass3<-bm4 %>% ggplot(aes(x = SAT_C,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Seed-Source Temperature (C)") + 
+  ylab('Root:Shoot Ratio') + 
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 15, y = .7, label = 'R2m = 0.28, R2c = 0.48', size = 4) +
+  annotate('text', x = 15, y = .6, label = 'p < 0.001', size = 4) +
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+biomass3
+
+##Local ADapt
+
+flow_local1<-local_flo %>% group_by(population,Treatment, CTD_km) %>%
+  summarise(percent_flo = mean(Flowering),
+            se = std.error(Flowering)) 
+flow_local2<-inner_join(flow_local1, climate_ID)
+
+localadapt<-flow_local2 %>% ggplot(aes(x = CTD_km, y = percent_flo*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flo - se , ymax = percent_flo + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Geographic Distance from Garden (km)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 170, y = 15, label = 'p < 0.001', size = 4) +
+  annotate('text', x = 170, y = 20, label = 'R2m = 0.03, R2c = 0.16', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20), 
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12))
+localadapt #local adapt _presentation
+```
+#greenhouse adjust for full graphs
+```{r}
+mort1<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100, color = Treatment))+ 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_live - se , ymax = percent_live + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Rainfall Variability (cv)") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12), 
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12))
+
+sla_2<-SLA_4.0 %>% ggplot(aes(x = SAT_C, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 3) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Temperature (mm)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+sla_2 #slaGH2_presentation
+
+sla_3<-SLA_4.0 %>% ggplot(aes(x = cv, y = mean, color = treatment)) + 
+  geom_point(aes(color = treatment, shape = treatment),size = 3) + 
+  geom_smooth(method  = 'lm', se = FALSE, color = "grey") + 
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Rainfall Variability (cv)") + 
+  ylab('Specific Leaf Area (mm2/g)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+
+sla_3 #slaGH3_presentation
+
+#biomass 
+biomass<-bm_total1 %>% ggplot(aes(x = cv, y = mean*100, 
+                             color = treatment, shape = treatment
+                             )) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+ scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Home Rainfall Variability (cv)") + 
+  ylab('Biomass (mg)') + 
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+biomass #biomass1
+
+#rs 
+biomass2<-bm4 %>% ggplot(aes(x = SAP_mm,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Home Precipitation (mm)") + 
+  ylab('Root:Shoot Ratio') + 
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+  
+biomass2 #biomass2
+
+biomass3<-bm4 %>% ggplot(aes(x = SAT_C,  y = mean, 
+                             color = treatment, shape = treatment)) + 
+  geom_point(size = 3) + 
+  geom_smooth(method = 'glm', se = FALSE) +
+  geom_ribbon(aes(color = treatment, fill = treatment,
+                  ymin = mean - se , ymax = mean + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  scale_color_manual(name= "Treatment", 
+                      values=c("indianred3", "royalblue2"),
+                      labels = c('Drought' , 'No Drought')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Drought','No Drought'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("indianred3", "royalblue2"),
+                    labels = c('Drought' , 'No Drought')) +
+  xlab("Home Temperature (C)") + 
+  ylab('Root:Shoot Ratio') + 
+  theme_classic() +
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12)) 
+biomass3
+```
+##fullgraph for defense
+```{r}
+## all graphs
+
+#mort 
+mort1<- mort1 + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                        axis.text.x = element_blank(),
+                         axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#flowering
+flo1<-flo_sap + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                      axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+flo2<-flo_sat+ theme(axis.text.x  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                      axis.text.y = element_text(size =12),
+                      axis.title.y = element_text(size =15),
+                      legend.position = "none",
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# garden SLA
+sla_1<-sla_1+ theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                       axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#greenhouse SLA
+sla_2<-sla_2 + theme(axis.title.x  = element_blank(),
+                          axis.text.x  = element_blank(),
+                           axis.title.y = element_text(size =15),
+                           axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+                    ylab('SLA'~(g/cm^2))
+  
+                
+        
+sla_3<-sla_3 + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                        axis.text.x  = element_blank(),
+                        axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# total biomass
+bm3<-biomass + theme(axis.title.y  = element_blank(),
+                 axis.title.x = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  xlab('Rainfall Variability (cv)')#CV
+#root to shoot 
+bm1<-biomass2 + theme(axis.title.y  = element_blank(),
+                axis.title.x  = element_blank(),
+                axis.text.y = element_blank(),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))#SAP
+
+bm2<-biomass3 + theme(axis.title.x  = element_blank(),
+                 axis.title.y = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  ylab('Root:Shoot')#SAT
+
+
+
+empty_sla_sap<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+generic_empty<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_mort<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100)) +
+  ylab('Survival (%)') +
+  theme_classic() +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+
+empty_sla_CG<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab(('SLA'~(g/cm^2))) +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_TB<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab('Total Biomass (g)') +
+  xlab('Temperature (C)') +
+  theme(axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") 
+
+generic_empty_SAP<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+         axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") + 
+  xlab('Precipitation (mm)')
+
+f1<-(empty_mort + generic_empty + mort1)/ #mort
+  (flo2 + flo1 + generic_empty) / #flowering
+  (empty_sla_CG + sla_1 + generic_empty) / #sla_garden
+  (sla_2 + empty_sla_sap + sla_3) / #sla_greenhouse
+  (bm2 + bm1 + generic_empty ) / #rs
+  (empty_TB + generic_empty_SAP + bm3) + #biomass total
+  plot_layout(widths = c(1,1), 
+              guides = 'collect')  
+```

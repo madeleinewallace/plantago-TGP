@@ -1,0 +1,95 @@
+---
+title: "vpd by trait results"
+author: "Maddie Wallace"
+date: "2025-02-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+library(tidyverse)
+
+library(tidyverse)
+library(ggplot2) # graphs
+library(patchwork) # collecting graphs
+library(gridExtra)
+library(grid)
+library(gtable)
+library(readxl)
+source('code-and-data/scripts/plpa-manuscript/01_clean.R')
+
+calculate_vpd_long <- function(df, trait_column) {
+  df |> 
+    group_by(spring_vpd_cv, TGP) |> 
+    summarise(
+      mean = round(mean(.data[[trait_column]], na.rm = TRUE), 6),
+      se = round(sd(.data[[trait_column]], na.rm = TRUE) / sqrt(sum(!is.na(.data[[trait_column]]))), 6),
+      .groups = "drop"
+    ) |> 
+    arrange(spring_vpd_cv, TGP)
+}
+
+
+root_output_long <- calculate_vpd_long(BIOMASS_FINAL, "root")
+print(root_output_long)
+
+
+shoot_output_long <- calculate_vpd_long(BIOMASS_FINAL, "shoot")
+print(shoot_output_long)
+
+
+total_output_long <- calculate_vpd_long(BIOMASS_FINAL, "total_biomass")
+print(total_output_long)
+
+
+rs_output_long <- calculate_vpd_long(BIOMASS_FINAL, "ratio_RS")
+print(rs_output_long)
+
+
+max_output_long <- calculate_vpd_long(HEIGHT_FINAL, "max")
+print(max_output_long)
+
+
+RGR_output_long <- calculate_vpd_long(RGR_FINAL, "RGR")
+print(RGR_output_long)
+
+
+sla_output_long <- calculate_vpd_long(SLA_LDMC_FINAL, "sla")
+print(sla_output_long)
+
+
+ldmc_output_long <- calculate_vpd_long(SLA_LDMC_FINAL, "ldmc")
+print(ldmc_output_long)
+
+
+mort_output_long <- calculate_vpd_long(MORT_DAY50, "status")
+print(mort_output_long)
+
+
+flowerstat_output_long <- calculate_vpd_long(FLOWER_STATUS, "status")
+print(flowerstat_output_long)
+
+
+seednum_output_long <- calculate_vpd_long(SEED_FINAL, "2023_num_total")
+print(seednum_output_long)
+
+
+seedmass_output_long <- calculate_vpd_long(SEED_FINAL, "2023_mass_total_g")
+print(seedmass_output_long)
+
+
+daysflow_output_long <- calculate_vpd_long(FLOWER_FINAL, "days_to_flower")
+print(daysflow_output_long)
+
+
+flowstruc_output_long <- calculate_vpd_long(FLOWER_FINAL, "num_structure")
+print(flowstruc_output_long)
+
+
+```
+
+

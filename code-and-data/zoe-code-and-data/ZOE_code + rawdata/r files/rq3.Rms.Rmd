@@ -1,0 +1,82 @@
+---
+title: "Plasticity"
+author: "Zoe Klein"
+date: "3/1/2022"
+output: word_document
+---
+#Biomass allocation and biomass plasticity 
+```{r setup, include=FALSE}
+##plasticity
+rs_plas<-bm2 %>% group_by(population, treatment) %>% 
+  summarise(mean = mean(logRatio_RS)) %>%
+  pivot_wider(names_from = treatment,
+              values_from = mean) %>% 
+  mutate(plas = abs(nondrought-drought))
+
+rs_plas2<-bm2 %>% group_by(population, treatment) %>% 
+  summarise(mean = mean(logRatio_RS), 
+            se = std.error(logRatio_RS)) %>%
+ pivot_wider(names_from = treatment,
+              values_from = c(mean, se)) %>% 
+  mutate(plas = abs(mean_nondrought-mean_drought),
+         se_plas = (se_drought + se_nondrought) / 2)
+
+total_plas <- total_bm %>%group_by(population, treatment) %>% 
+  summarise(mean = mean(Total_g)) %>%
+  pivot_wider(names_from = treatment,
+              values_from = mean) %>% 
+  mutate(plas = abs(nondrought-drought))
+
+b<-full_join(total_plas, climate_ID)
+m<-lm(plas ~  cv , data = b)
+m1<-lm(plas ~  SAT_C , data = b)
+m2<-lm(plas ~  SAP_mm , data = b)
+
+a<-full_join(rs_plas, climate_ID)
+
+m<-lm(plas ~  cv , data = a)
+m1<-lm(plas ~  SAT_C , data = a)
+m2<-lm(plas ~  SAP_mm , data = a)
+
+summary(m1)
+summary(m2)
+summary(m)
+
+plot(residuals(m))
+qqnorm(residuals(m))
+
+plot(residuals(m1))
+qqnorm(residuals(m1))
+
+plot(residuals(m2))
+qqnorm(residuals(m2))
+
+a %>% ggplot(aes(x = SAT_C, y = plas)) + geom_point() + geom_smooth( method = 'lm')
+b %>% ggplot(aes(x = SAT_C, y = plas)) + geom_point()
+
+
+```
+
+```{r}
+
+a<-full_join(rs_plas2, climate_ID)
+plas<-a %>% ggplot(aes(x = SAT_C, y = plas, color = SAT_C)) + geom_point(size = 3) + 
+  geom_errorbar(aes(ymin=plas-se_plas, ymax=plas+se_plas), width=.01,
+                 position=position_dodge(0.05)) + 
+  geom_smooth(method = "lm", se = FALSE, color = "grey") + 
+  scale_color_gradient(low = "deepskyblue3", high = "darkorange1") + 
+  theme_classic() + 
+  xlab("Seed-Source Temperature (C)") + 
+  ylab("Root:Shoot Plasticity") + 
+  annotate('text', x = 19, y = .15, label = 'p = 0.03', size = 4) +
+  annotate('text', x = 19, y = .1, label = 'R2 = 0.40', size = 4) +
+  theme(panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5), 
+        legend.position = "none", 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20), 
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15))
+
+```

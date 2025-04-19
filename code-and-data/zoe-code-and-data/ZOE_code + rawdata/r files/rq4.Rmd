@@ -1,0 +1,336 @@
+---
+title: "RQ4- Local Adaptation"
+author: "Zoe Klein"
+date: "2/28/2022"
+output: word_document
+---
+```{r}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(lmerTest)
+library(forcats)
+library(plotrix)
+library(emmeans)
+library(ggpubr)
+library(patchwork)
+library(MuMIn)
+
+```
+##Mort Wrangle 
+
+```{r}
+mort_untidy<- read_excel("~/Documents/NAU/Thesis/Field/NMLC+common garden/RAW DATA/Garden_Data_102721.xlsx", 
+                         sheet = 1)
+
+mort_tidy<- mort_untidy %>% 
+  drop_na(Population_ID) %>% 
+  rename(population = Population_ID) %>% 
+  mutate(population = as.factor(population)) %>%
+  dplyr::select(-c(notes))
+
+#climate info
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.character(population)) %>%
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes))
+##joining data
+mort_clim<-inner_join(mort_tidy,climate_ID)
+
+
+##pivot data and make status binary 
+mort_clim_tidy<-mort_clim %>% 
+  pivot_longer(April_30:Aug_10, 
+               names_to = 'date',
+               values_to = 'status') %>%
+  mutate(status = if_else(status == 'DEAD', 0, 1))
+
+##looking at last collected date for mortality June 12
+june_mort<-mort_clim_tidy %>% filter(date == 'June_12') %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         Treatment = as.factor(Treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon))
+
+```
+
+##Euclidean distance## 
+```{r}
+euclidean <- function(a, b) sqrt(sum((a - b)^2))
+
+mort_clim %>% rowwise() %>% euclidean(mort_clim$SAT_C, mort_clim$SAP_mm)
+
+climate_transfer <-climate_ID %>% mutate(local_index = SAP_mm/(SAT_C +10), 
+                      CG_index = CG_SAPmm/(CG_SATC + 10),
+                      CD = CG_index - local_index)
+
+cd_mort<-full_join(climate_transfer,june_mort)
+```
+#Mort: Environmental Distance 
+```{r}
+m1<-glmer(status ~  CD  + 
+            (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = cd_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                               optimizer = 'bobyqa'))
+
+m1<-glmer(status ~ Cvdiff + Treatment +
+            (1|Plot/cv_temp_mon) , family = binomial(link = "logit"), data = june_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                               optimizer = 'bobyqa'))
+
+summary(m1)
+
+
+```
+
+#Mort: Geographic Distance
+```{r}
+library(geosphere)
+
+latlong<-climate_ID %>% 
+   rowwise() %>%
+    mutate(CTD = geosphere::distm(c(Long, Lat), c(CGLong, CGLAT)))
+
+latlong_simp<-latlong %>% group_by(population) %>% summarise(CTD_km = CTD/1000)
+
+local_mort<- full_join(june_mort, latlong_simp)
+
+scaled <- transform(local_mort,
+                    CTD_km=scale(CTD_km),
+                    SATCdiff=scale(SATCdiff),
+                    Cvdiff = scale(Cvdiff), 
+                    SAPmmDif = scale(SAPmmDif))
+
+m1<-glmer(status ~  CTD_km +
+            (1|Plot/population) , family = binomial(link = "logit"), data = scaled,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                            optimizer = 'bobyqa'))
+
+m1<-glmer(status ~  CTD_km +
+            (1|Plot/population) , family = binomial(link = "logit"), data = local_mort,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                            optimizer = 'bobyqa'))
+
+summary(m1) 
+anova(m1
+      )
+r.squaredGLMM(m1)
+```
+#Flowering Wrangle
+```{r}
+
+flower_untidy<- read_excel("~/Documents/NAU/Thesis/Field/NMLC+common garden/RAW DATA/most recent/Seed_Cleaning_12622.xlsx", 
+                           sheet = 1)
+flower_tidy<-flower_untidy %>% 
+  mutate(Population_ID = as.factor(Population_ID)) %>% 
+  rename(population = Population_ID)
+
+## adding climate data
+climate_ID_untidy<-read_xlsx("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfo_91521.xlsx", sheet = 2)
+
+climate_ID<-climate_ID_untidy %>% 
+  mutate(population = as.factor(population)) %>%
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes))
+##joining together with the climate data stuff so I can do some visualizing graphing
+flower_clim<-inner_join(flower_tidy,climate_ID) %>% 
+  mutate(population = as.factor(population), 
+         temp_cv = as.factor(temp_cv), 
+         cv_temp_mon = as.factor(cv_temp_mon), 
+         Treatment = as.factor(Treatment), 
+         cvlevel = as.factor(cvlevel), 
+         temp = as.factor(temp),
+         monsoon = as.factor(monsoon),
+         Flowering = as.factor(Flowering)) %>%
+  mutate(Flowering = if_else(Flowering == 'Y', 1, 0)) #1 means yes flowering 
+
+
+## Proportions flowering 
+percent<-flower_clim %>% group_by(population,Treatment, cv_temp_mon) %>%
+  summarise(percent_flower = mean(Flowering),
+            sd_flower = sd(Flowering)) %>% 
+  mutate(percent_noflower = 1-percent_flower) 
+percent_flow<-inner_join(percent, climate_ID) 
+```
+#climate transfer distance 
+```{r}
+climate_transfer<-climate_ID %>% mutate(local_index = SAP_mm/(SAT_C+ 10), 
+                      CG_index = CG_SAPmm/(CG_SATC + 10),
+                      CD = CG_index - local_index)
+
+cd_flo<-full_join(climate_transfer,flower_clim)
+
+m1<-glmer(Flowering ~ CD +
+            (1|Plot/population) , family = binomial(link = "logit"), data = cd_flo,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                               optimizer = 'bobyqa'))
+
+summary(m1)
+
+```
+
+#Flowering Geographic + Environmental Distance
+```{r}
+latlong<-climate_ID %>% 
+  rowwise() %>%
+  mutate(CTD = geosphere::distm(c(Long, Lat), c(CGLong, CGLAT)))
+latlong_simp<-latlong %>% group_by(population) %>% summarise(CTD_km = CTD/1000)
+
+local_flo<- full_join(flower_clim, latlong_simp)
+
+scaled <- transform(local_flo,
+                    CTD_km=scale(CTD_km))
+
+
+m1<-glmer(Flowering ~ CTD_km*Treatment +
+            (1|Plot/population) , family = binomial(link = "logit"), data = scaled,
+          control=glmerControl(optCtrl=list(maxfun=1e4), 
+                               optimizer = 'bobyqa'))
+summary(m1)
+r.squaredGLMM(m1) 
+
+
+```
+#Graphing
+```{r}
+# flowering Distance
+flow_local1<-local_flo %>% group_by(population,Treatment, CTD_km) %>%
+  summarise(percent_flo = mean(Flowering),
+            se = std.error(Flowering)) 
+flow_local2<-inner_join(flow_local1, climate_ID)
+
+p1<-flow_local2 %>% ggplot(aes(x = CTD_km, y = percent_flo*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flo - se , ymax = percent_flo + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Geographic Distance from Garden (km)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+  annotate('text', x = 80, y = 8, label = '***', size = 6) +
+  annotate('text', x = 80, y = 16, label = 'R2c = 0.16', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = c(.9,.9),
+        axis.title.x = element_text(size = 15), 
+        axis.title.y = element_text(size = 15), 
+        axis.text.x = element_text(size = 12),
+        axis.text.y = element_text(size = 12),
+        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+
+
+flow_local1<-cd_flo %>% group_by(population,Treatment, CD) %>%
+  summarise(percent_flo = mean(Flowering),
+            se = std.error(Flowering)) 
+flow_local2<-inner_join(flow_local1, climate_ID)
+
+p4<-flow_local2 %>% ggplot(aes(x = CD, y = percent_flo*100)) + 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 2) + 
+  geom_smooth(method  = 'glm', se = FALSE, color = 'grey') + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_flo - se , ymax = percent_flo + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Environmental Distance from Garden (km)") + 
+  ylab('Flowering (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  geom_rug(sides = "b", color = 'gray') +
+ # annotate('text', x = 80, y = 8, label = '***', size = 6) +
+#  annotate('text', x = 80, y = 16, label = 'R2c = 0.23', size = 4) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 7),
+        legend.title = element_text(size = 8),
+        legend.position = c(.9,.9))
+
+
+# mortality Distance
+
+local1<-local_mort %>% group_by(population,Treatment, CTD_km) %>%
+  summarise(percent_live = mean(status),
+            se = std.error(status)) %>% 
+  mutate(percent_dead = 1-percent_live) 
+local2<-inner_join(local1, climate_ID)
+
+p2<-local2 %>% ggplot(aes(x = CTD_km, y =percent_live*100, color = Treatment, shape = Treatment)) + geom_point(size = 2) + geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment, ymin = percent_live - se , ymax = percent_live + se), alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Geographic Distance from Garden") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name = 'Treatment',
+                     values=c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) + 
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 8), 
+        legend.position = 'none',
+        #panel.border = element_rect(colour = "black", fill=NA, size=1),
+        axis.text.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.ticks.x = element_blank()) +
+  annotate('text', x = 80, y = 55, label = 'R2c = 0.24', size = 4)
+
+
+plot<-p2/p1  + plot_annotation(tag_levels = "a")+
+  plot_layout(guides= 'collect')
+
+plot1<-p4/p3
+
+local1<-cd_mort %>% group_by(population,Treatment, CD) %>%
+  summarise(percent_live = mean(status),
+            se = std.error(status)) %>% 
+  mutate(percent_dead = 1-percent_live) 
+local2<-inner_join(local1, climate_ID)
+
+p3<- local2 %>% ggplot(aes(x = CD, y =percent_live*100, color = Treatment, shape = Treatment)) + geom_point(size = 2) + geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment, ymin = percent_live - se , ymax = percent_live + se), alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Environmental Distance from Garden") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name = 'Treatment',
+                     values=c("darkgoldenrod2", "darkcyan"),
+                     labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) + 
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 8), 
+        legend.position = 'none')
+        #panel.border = element_rect(colour = "black", fill=NA, size=1),
+  #  axis.text.x = element_blank(),
+  #  axis.title.x = element_blank(),
+  #  axis.ticks.x = element_blank()) #+
+#  annotate('text', x = 80, y = 55, label = 'R2c = 0.24', size = 4)
+
+
+```

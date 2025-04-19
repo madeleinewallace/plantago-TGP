@@ -1,0 +1,274 @@
+---
+title: "Heidi Seed"
+author: "Zoe Klein"
+date: "4/27/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+library(readr) #reading csv files
+library(readxl) #reading excel sheets
+library(tidyverse) #dyplyr 
+library(lmerTest) #mixed mdoel!
+library(forcats) ## for factor manipulation
+library(plotrix) ## standard error function
+library(emmeans) #post hoc stuff 
+library(ggpubr) #i forget what this one is 
+library(patchwork) #combining graphs
+library(MuMIn) #R2c and r2m Values
+library(wesanderson) #ggplot color palletes 
+library(lubridate) ##for manipulating dates 
+```
+
+## Wrangle code
+
+```{r cars}
+##Seed Masses
+seed_untidy<- read_excel("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfoSeedInfo426222_heidi.xlsx", sheet = 3)
+
+seed_tidy<- seed_untidy %>% 
+  drop_na(Population_ID) %>% 
+  rename(population = Population_ID) %>% 
+  mutate(population = as.factor(population), 
+         Treatment = as.factor(Treatment),
+         Plot = as.factor(Plot), 
+         ID = as.factor(ID)) %>% 
+  mutate(seed_g = Mass_Total_g/`# weighed`) %>%
+  dplyr::select(-c(Notes)) %>% 
+  drop_na(Mass_Total_g)
+
+##Climate data
+climate_untidy<- read_excel("~/Documents/NAU/Thesis/Field/Greenhouse/Raw Data Entry/ClimateInfoSeedInfo426222_heidi.xlsx", sheet = 1)
+
+climate_ID<-climate_untidy %>% 
+  mutate(population = as.character(population)) %>%
+  rename(temp = ...9) %>%
+  dplyr::select(-c(notes))
+##joining data
+seed_clim<-inner_join(seed_tidy,climate_ID)
+```
+
+
+##Graphing for visuals
+
+```{r pressure, echo=FALSE}
+#need to transform? 
+seed_clim %>% ggplot(aes(x = seed_g)) +geom_density() ##looks good
+
+seed_clim %>% ggplot(aes(y = seed_g, x = SAT_C, color = Treatment)) +
+  geom_point() + 
+  geom_smooth(method = "lm")
+
+seed_clim %>% ggplot(aes(y = seed_g, x = population, color = Treatment)) +
+  geom_boxplot()
+
+```
+#Mixed Model
+```{r}
+m1<-lmer(Mass_Total_g ~ SAT_C*Treatment + cv*Treatment + SAP_mm*Treatment + 
+               (1|Plot/population), data = seed_clim)
+summary(m1)
+
+m2 ## remove variables one by one, start with interactions. If an interaction becomes significant but the main effect isn't you cannot remove the main effect and keep the interaction in the model 
+
+# use AIC to compare model selection 
+AIC(m1,m2)
+
+#r2 values for any significant models is with this function from the MuMin package
+r.squaredGLMM(m1) 
+```
+##General Code for summary datafram for graphing 
+```{r}
+means<- df %>% group_by(Treatment, population) %>%
+  mutate(means = mean(Trait), # put whatever you want averaged here 
+         se = std.error(Trait)) #from plotrix package
+          
+```
+
+##General Graphing Code
+```{r}
+## this is one graph I made for my defense, the percent_live2 data frame is means and error for each of my populations, and then I used means to make a cleaner graph. the plotrix pacakge has a nice function for SE. 
+mort1<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100, color = Treatment))+ 
+  geom_point(aes(color = Treatment, shape = Treatment),size = 3) + 
+  geom_smooth(method  = 'glm', se = FALSE) + 
+  geom_ribbon(aes(color = Treatment, fill = Treatment,
+                  ymin = percent_live - se , ymax = percent_live + se),
+              alpha = .1, stat = 'smooth', method = 'glm', linetype = 2) +
+  xlab("Home Rainfall Variability (cv)") + 
+  ylab('Survival (%)') + 
+  scale_color_manual(name= "Treatment", 
+                      values=c("darkgoldenrod2", "darkcyan"),
+                      labels = c('Ambient' , 'Watered')) + 
+  scale_shape_manual(name = 'Treatment', 
+                     labels = c('Ambient','Watered'),
+                     values = c(2,1)) +
+  scale_fill_manual(name= "Treatment", 
+                    values=c("darkgoldenrod2", "darkcyan"),
+                    labels = c('Ambient' , 'Watered')) +
+  theme_classic()+
+  theme(legend.text = element_text(size = 10),
+        legend.title = element_text(size = 12), 
+        axis.title = element_text(size = 20),
+        axis.text = element_text(size = 12))
+
+```
+
+#Using Patchwork package to make a large graph 
+```{r}
+## all graphs
+
+#mort 
+mort1<- mort1 + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                        axis.text.x = element_blank(),
+                         axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#flowering
+flo1<-flo_sap + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                      axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+flo2<-flo_sat+ theme(axis.text.x  = element_blank() ,
+                          axis.title.x  = element_blank(), 
+                      axis.text.y = element_text(size =12),
+                      axis.title.y = element_text(size =15),
+                      legend.position = "none",
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# garden SLA
+sla_1<-sla_1+ theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                      axis.text.x  = element_blank(),
+                       axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+#greenhouse SLA
+sla_2<-sla_2 + theme(axis.title.x  = element_blank(),
+                          axis.text.x  = element_blank(),
+                           axis.title.y = element_text(size =15),
+                           axis.text.y = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+                    ylab('SLA'~(g/cm^2))
+  
+                
+        
+sla_3<-sla_3 + theme(axis.title.y  = element_blank() ,
+                          axis.title.x  = element_blank(),
+                        axis.text.x  = element_blank(),
+                        axis.text.y = element_blank(),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))
+# total biomass
+bm3<-biomass + theme(axis.title.y  = element_blank(),
+                 axis.title.x = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  xlab('Rainfall Variability (cv)')#CV
+#root to shoot 
+bm1<-biomass2 + theme(axis.title.y  = element_blank(),
+                axis.title.x  = element_blank(),
+                axis.text.y = element_blank(),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5))#SAP
+
+bm2<-biomass3 + theme(axis.title.x  = element_blank(),
+                 axis.title.y = element_text(size =15),
+                 axis.text.y = element_text(size =12),
+                 axis.text.x = element_text(size =12),
+                        panel.border = element_rect(color = "black",
+                                    fill = NA,
+                                    size = .5)) + 
+  ylab('Root:Shoot')#SAT
+
+
+
+empty_sla_sap<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+generic_empty<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_mort<-percent_live2 %>% ggplot(aes(x = cv, y = percent_live*100)) +
+  ylab('Survival (%)') +
+  theme_classic() +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+
+empty_sla_CG<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab(('SLA'~(g/cm^2))) +
+  theme(axis.title.x  = element_blank(),
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(),
+        axis.title.y = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black")
+
+empty_TB<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  ylab('Total Biomass (g)') +
+  xlab('Temperature (C)') +
+  theme(axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+        axis.title.y = element_text(size =15),
+        axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") 
+
+generic_empty_SAP<-SLA_3 %>% ggplot(aes(x = SAP_mm, y = mean)) + 
+  theme_classic() +
+  theme(axis.title.y  = element_blank() ,
+        axis.text.x  = element_blank(),
+        axis.text.y  = element_blank(), 
+         axis.title.x = element_text(size =15),
+        line = element_blank()) +
+  annotate(geom="text", x=47, y=4.5, label="NS",
+              color="black") + 
+  xlab('Precipitation (mm)')
+
+f1<-(empty_mort + generic_empty + mort1)/ #mort
+  (flo2 + flo1 + generic_empty) / #flowering
+  (empty_sla_CG + sla_1 + generic_empty) / #sla_garden
+  (sla_2 + empty_sla_sap + sla_3) / #sla_greenhouse
+  (bm2 + bm1 + generic_empty ) / #rs
+  (empty_TB + generic_empty_SAP + bm3) + #biomass total
+  plot_layout(widths = c(1,1), 
+              guides = 'collect')  
+```
