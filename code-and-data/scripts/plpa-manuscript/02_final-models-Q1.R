@@ -52,6 +52,9 @@ root_r2
 rootcontrast <- emmeans(biomassroot_model1, specs = pairwise ~ ot:pt, type = "response")
 rootcontrast$contrasts
 
+rootcontrast1 <- emmeans(biomassroot_model1, specs = pairwise ~ ot, type = "response")
+rootcontrast1$contrasts
+
 
 
 # shoot biomass-----------------------------------------------------------------
@@ -81,6 +84,9 @@ shoot_r2
 shootcontrast <- emmeans(biomassshoot_model1, specs = pairwise ~ ot:pt, type = "response")
 shootcontrast$contrasts
 
+shootcontrast1 <- emmeans(biomassshoot_model1, specs = pairwise ~ ot, type = "response")
+shootcontrast1$contrasts
+
 
 
 # total biomass ----------------------------------------------------------------
@@ -107,10 +113,11 @@ total_anova
 total_r2
 
 #contrasts
-totalcontrast <- emmeans(biomasstotal_model1, specs = pairwise ~ ot:pt)
+totalcontrast <- emmeans(biomasstotal_model1, specs = pairwise ~ ot:pt, type = "response")
 totalcontrast$contrasts
 
-
+totalcontrast1 <- emmeans(biomasstotal_model1, specs = pairwise ~ ot, type = "response")
+totalcontrast1$contrasts
 
 # root:shoot ratio -------------------------------------------------------------
 biomassRS_model1 <- lmer(log_RS ~ ot + pt + ot:pt + (1|pop), 
@@ -137,7 +144,8 @@ rs_r2
 rscontrast <- emmeans(biomassRS_model1, specs = pairwise ~ ot:pt, type = "response")
 rscontrast$contrasts
 
-
+rscontrast1 <- emmeans(biomassRS_model1, specs = pairwise ~ ot, type = "response")
+rscontrast1$contrasts
 
 # max height -------------------------------------------------------------------
 
@@ -185,6 +193,9 @@ rgr_anova <- Anova(rgr_model1, type="III",  test.statistic= "F")
 rgr_r2 <- r.squaredGLMM(rgr_model1)
 rgr_anova
 rgr_r2
+
+rgrcontrast1 <- emmeans(rgr_model1, specs = pairwise ~ ot, type = "response")
+rgrcontrast1$contrasts
 
 
 # mortality --------------------------------------------------------------------
@@ -259,6 +270,9 @@ ldmc_anova <- Anova(ldmc_model1, type="III",  test.statistic= "F")
 ldmc_r2 <- r.squaredGLMM(ldmc_model1)
 ldmc_anova
 ldmc_r2
+
+ldmccontrast1 <- emmeans(ldmc_model1, specs = pairwise ~ ot, type = "response")
+ldmccontrast1$contrasts
 
 
 # num of plants that flowered --------------------------------------------------
@@ -353,6 +367,8 @@ performance::r2(flowerstatus_model1)
 # parental drought reduces the odds of having a structural zero - parental drought reduces the odds of NOT flowering
 # amazing
 
+flowercontrast1 <- emmeans(flowerstructure_model1, specs = pairwise ~ ot, type = "response")
+flowercontrast1$contrasts
 
 
 # days to flower ---------------------------------------------------------------
