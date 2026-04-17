@@ -310,18 +310,17 @@ flow_summary <- flow_na |>
   summarise(mean_flow = mean(status * n()), 
             se_flow = sd(status * n()) / sqrt(n()), .groups = 'drop')
 
-# drought parental treatment
 flow_drought <- ggplot(filter(flow_summary, TGP %in% c("DD", "CD")), 
-                      aes(x = spring_vpd_cv, y = mean_flow, color = TGP, shape = TGP)) +
-  geom_point(size = 3) +
-  geom_smooth(aes(color = TGP), method = "lm", se = TRUE, size = 1.2, alpha = 0.15) +
+                       aes(x = spring_vpd_cv, y = mean_flow, color = TGP)) +
+  geom_point(size = 1.5, alpha = 0.8) +
+  geom_smooth(aes(color = TGP, linetype = TGP), method = "lm", se = TRUE, size = 1.2, alpha = 0.15) +
   labs(title = "offspring treatment = drought", 
        x = "spring VPD CV (%)", 
-       y = "number flowered ", 
+       y = "number flowered", 
        color = "treatment group", 
        shape = "treatment group") + 
   scale_color_manual(values = c("DD" = "#A32B6B", "CD" = "#C7B245")) +
-  scale_shape_manual(values = c("DD" = 17, "CD" = 16)) +
+  scale_linetype_manual(values = c("DD" = "dotted", "CD" = "dashed")) +
   ylim(-7, 35) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(), axis.line = element_line(colour = "black"),
@@ -336,18 +335,17 @@ flow_drought <- ggplot(filter(flow_summary, TGP %in% c("DD", "CD")),
         legend.position = "none")
 flow_drought
 
-# control parental treatment
 flow_control <- ggplot(filter(flow_summary, TGP %in% c("DC", "CC")), 
-                      aes(x = spring_vpd_cv, y = mean_flow, color = TGP, shape = TGP)) +
-  geom_point(size = 3) +
-  geom_smooth(aes(color = TGP), method = "lm", se = TRUE, size = 1.2, alpha = 0.15) +
+                       aes(x = spring_vpd_cv, y = mean_flow, color = TGP)) +
+  geom_point(size = 1.5, alpha = 0.8) +
+  geom_smooth(aes(color = TGP, linetype = TGP), method = "lm", se = TRUE, size = 1.2, alpha = 0.15) +
   labs(title = "offspring treatment = control",  
        x = "spring VPD CV (%)", 
        y = "number flowered", 
        color = "treatment group", 
        shape = "treatment group") +  
   scale_color_manual(values = c("CC" = "#386C9E", "DC" = "#177D31")) +
-  scale_shape_manual(values = c("CC" = 16, "DC" = 17)) +
+  scale_linetype_manual(values = c("CC" = "solid", "DC" = "dotdash")) +
   ylim(-7, 35) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
         panel.background = element_blank(), axis.line = element_line(colour = "black"),
@@ -698,7 +696,7 @@ flowernum_rxn <- ggplot(flowernum_summary, aes(x = ot, y = mean_flow, color = pt
   geom_point(aes(shape = pt), size = 2) +
   geom_errorbar(aes(ymin = mean_flow - se_flow, ymax = mean_flow + se_flow), width = 0.1, linewidth = 0.5) +
   geom_line(linewidth = 0.5) +
-  labs(y = "number of flower structures", x = " ", color = " ") +
+  labs(y = "# of flower structures", x = " ", color = " ") +
   scale_color_manual(values = c("control" = "#548E90", "drought" = "#7A2218")) +
   scale_shape_manual(values = c("control" = 16, "drought" = 17)) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
@@ -768,6 +766,7 @@ seedmass_bar <- ggplot(seedm_summary_tgp, aes(x = TGP, y = mean_seed, fill = TGP
   geom_errorbar(aes(ymin = mean_seed - se_seed, ymax = mean_seed + se_seed), 
                 width = 0.2, linewidth = 0.5) + 
   scale_fill_manual(values = c("CC" = "grey80", "CD" = "grey60", "DC" = "grey40", "DD" = "grey20")) +  # Greyscale fills
+  scale_x_discrete(labels = c("CC" = "HH", "CD" = "HL", "DC" = "LH", "DD" = "LL")) +
   theme(legend.key.size = unit(1.5, 'cm')) + 
   labs(y = "seed mass (g)", x = "treatment", fill = "Treatment") +  # Removed pattern legend
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),

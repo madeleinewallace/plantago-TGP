@@ -38,7 +38,7 @@ BIOMASS_FINAL$scv_scaled <- scale(BIOMASS_FINAL$cv_term_spring)
 BIOMASS_FINAL$vpd_scaled <- scale(BIOMASS_FINAL$spring_vpd_cv)
 
 # model
-biomassroot_1 <- lmer(root ~ ot * pt * vpd_scaled + (1|pop), 
+biomassroot_1 <- lm(root ~ ot * pt * vpd_scaled, 
                            data=BIOMASS_FINAL, na.action = na.exclude)
 vif(biomassroot_1)
 
@@ -70,7 +70,7 @@ root_slopes
 BIOMASS_FINAL$vpd_scaled <- scale(BIOMASS_FINAL$spring_vpd_cv)
 
 # model
-biomassshoot_1 <- lmer(shoot ~ ot * pt * vpd_scaled + (1|pop), 
+biomassshoot_1 <- lm(shoot ~ ot * pt * vpd_scaled, 
                       data=BIOMASS_FINAL, na.action = na.exclude)
 vif(biomassshoot_1)
 
@@ -101,7 +101,7 @@ shootcontrast$contrasts
 BIOMASS_FINAL$vpd_scaled <- scale(BIOMASS_FINAL$spring_vpd_cv)
 
 # model
-biomasstotal_1 <- lmer(total_biomass ~ ot * pt * vpd_scaled + (1|pop), 
+biomasstotal_1 <- lm(total_biomass ~ ot * pt * vpd_scaled, 
                        data=BIOMASS_FINAL, na.action = na.exclude)
 vif(biomasstotal_1)
 
@@ -135,7 +135,7 @@ total_slopes
 BIOMASS_FINAL$vpd_scaled <- scale(BIOMASS_FINAL$spring_vpd_cv)
 
 # model
-biomassrs_1 <- lmer(log_RS ~ ot * pt * vpd_scaled + (1|pop), 
+biomassrs_1 <- lm(log_RS ~ ot * pt * vpd_scaled, 
                        data=BIOMASS_FINAL, na.action = na.exclude)
 vif(biomasstotal_1)
 
@@ -165,7 +165,7 @@ rs_slopes
 HEIGHT_FINAL$vpd_scaled <- scale(HEIGHT_FINAL$spring_vpd_cv)
 
 # model
-height_1 <- lmer(max ~ ot * pt * vpd_scaled + (1|pop), 
+height_1 <- lm(max ~ ot * pt * vpd_scaled, 
                     data=HEIGHT_FINAL, na.action = na.exclude)
 vif(height_1)
 
@@ -201,7 +201,7 @@ heightcontrast$contrasts
 RGR_FINAL$vpd_scaled <- scale(RGR_FINAL$spring_vpd_cv)
 
 # model
-rgr_1 <- lmer(RGR ~ ot * pt * vpd_scaled + (1|pop), 
+rgr_1 <- lm(RGR ~ ot * pt * vpd_scaled, 
                  data=RGR_FINAL, na.action = na.exclude)
 vif(rgr_1)
 
@@ -235,7 +235,7 @@ rgr_slopes
 MORT_DAY50$vpd_scaled <- scale(MORT_DAY50$spring_vpd_cv)
 
 # model
-mort_1 <- glmer(status ~ ot * pt * vpd_scaled + (1|pop), 
+mort_1 <- glm(status ~ ot * pt * vpd_scaled, 
                data = MORT_DAY50, family = binomial(link = "logit"), na.action = na.exclude)
 vif(mort_1)
 
@@ -249,7 +249,7 @@ check_model(mort_1)
 
 # final stats
 summary(mort_1)
-mort_anova <- Anova(mort_1, type = "III", test.statistic = "Chisq")
+mort_anova <- Anova(mort_1, type = "III", test.statistic = "LR")
 mort_r2 <- r.squaredGLMM(mort_1)
 mort_anova
 mort_r2
@@ -266,7 +266,7 @@ mortcontrast$contrasts
 SLA_LDMC_FINAL$vpd_scaled <- scale(SLA_LDMC_FINAL$spring_vpd_cv)
 
 # model
-sla_1 <- lmer(log(sla) ~ ot * pt * vpd_scaled + (1|pop), 
+sla_1 <- lm(log(sla) ~ ot * pt * vpd_scaled, 
               data=SLA_LDMC_FINAL, na.action = na.exclude)
 vif(sla_1)
 
@@ -297,7 +297,7 @@ slacontrast$contrasts
 SLA_LDMC_FINAL$vpd_scaled <- scale(SLA_LDMC_FINAL$spring_vpd_cv)
 
 # model
-ldmc_1 <- lmer(log(ldmc) ~ ot * pt * vpd_scaled + (1|pop), 
+ldmc_1 <- lm(log(ldmc) ~ ot * pt * vpd_scaled, 
               data=SLA_LDMC_FINAL, na.action = na.exclude)
 vif(ldmc_1)
 
@@ -328,7 +328,7 @@ ldmccontrast$contrasts
 FLOWER_STATUS$vpd_scaled <- scale(FLOWER_STATUS$spring_vpd_cv)
 
 # model
-flowerstatus_1 <- glmmTMB(status ~ ot * pt * vpd_scaled + (1|pop), 
+flowerstatus_1 <- glmmTMB(status ~ ot * pt * vpd_scaled, 
                                ziformula = ~ot + pt + vpd_scaled, 
                                family = binomial, 
                                data = FLOWER_STATUS)
@@ -363,7 +363,7 @@ flow_slopes
 FLOWER_FINAL$vpd_scaled <- scale(FLOWER_FINAL$spring_vpd_cv)
 
 # model
-flowerstructure_1 <- glmmTMB(num_structure ~ ot * pt * vpd_scaled + (1|pop), 
+flowerstructure_1 <- glmmTMB(num_structure ~ ot * pt * vpd_scaled, 
                                   ziformula = ~ot + pt + vpd_scaled, 
                                   family = truncated_nbinom2, 
                                   data = FLOWER_FINAL)
@@ -395,7 +395,7 @@ flowerstructurecontrast$contrasts
 FLOWER_FINAL$vpd_scaled <- scale(FLOWER_FINAL$spring_vpd_cv)
 
 # model
-flowerdays_1 <- glmmTMB(days_to_flower ~ ot * pt * vpd_scaled + (1|pop),
+flowerdays_1 <- glmmTMB(days_to_flower ~ ot * pt * vpd_scaled,
                              family = nbinom2, 
                              control = glmmTMBControl(optimizer = "nlminb"),
                              data = FLOWER_FINAL)
@@ -462,7 +462,7 @@ seedmasscontrast$contrasts
 SEED_FINAL$vpd_scaled <- scale(SEED_FINAL$spring_vpd_cv)
 
 # model
-seednum_1 <- glmmTMB(num_total ~ ot * pt * vpd_scaled + (1 | pop),
+seednum_1 <- glmmTMB(num_total ~ ot * pt * vpd_scaled,
                           family = nbinom2, 
                           control = glmmTMBControl(optimizer = "nlminb"),
                           data = SEED_FINAL)

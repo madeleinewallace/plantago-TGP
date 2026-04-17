@@ -148,3 +148,71 @@ flowstruc_output_long <- calculate_vpd_long(FLOWER_FINAL, "num_structure")
 print(flowstruc_output_long)
 write.table(flowstruc_output_long, pipe("pbcopy"), sep = "\t", row.names = FALSE)
 
+
+################################# mappie----------------------------------------
+
+# packages
+library(sf)
+library(ggplot2)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(ggspatial)
+library(prettymapr)
+
+
+# load data
+climate <- read_excel("code-and-data/data/2021-climate-info-MW.xlsx")
+
+# convert to sf object
+climate_sf <- st_as_sf(climate, coords = c("Long", "Lat"), crs = 4326)
+
+# get U.S. map
+us <- ne_states(country = "united states of america", returnclass = "sf")
+
+# filter southwestern states
+southwest <- us[us$name %in% c("California", "Nevada", "Arizona", "Texas", "New Mexico", "Utah", "Colorado", "Oklahoma", "Kansas", "Wyoming", "Idaho"), ]
+
+# plot
+map <- ggplot() +
+  geom_sf(data = southwest, fill = "white", color = "black", size = 0.6) +
+  geom_sf(data = climate_sf, color = "gray", alpha = 10, size = 8, shape = 16) +
+  geom_sf_text(data = climate_sf,
+               aes(label = population),
+               color = "black", size = 16 / .pt, nudge_y = 0, nudge_x = 0, family = "Helvetica") +
+  coord_sf(xlim = c(-118, -102), ylim = c(30, 43), expand = FALSE) +
+  annotation_scale(location = "bl", width_hint = 0.3, text_family = "Helvetica",  line_width = 0.4) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+                         pad_x = unit(0.03, "in"), pad_y = unit(0.2, "in"),
+                         style = north_arrow_fancy_orienteering) +
+  theme_classic(base_family = "Helvetica", base_size = 16) +
+  theme(axis.title = element_text(family = "Helvetica", size = 16),
+    axis.text = element_text(family = "Helvetica", size = 16)) +
+  xlab("Longitude") + ylab("Latitude")
+
+map
+
+# save
+
+ggsave("map.svg", plot = map, path = "code-and-data/scripts/plpa-manuscript/figures",
+       dpi = 600)
+
+
+
+################################# seed size difference--------------------------
+library(readxl)
+
+seedmass <- read_excel("code-and-data/data/2021-greenhouse-data_f1zoe-seed-data.xlsx", 
+                                                    sheet = "weight of 25 seeds")
+
+ggplot(seedmass, aes(x = `2021_treatment`, y = `2021_mass_25_g`, fill = `2021_treatment`)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(title = "Seed Mass by Treatment", y = "Mass (g)", x = "Treatment")
+
+t.test(`2021_mass_25_g` ~ `2021_treatment`, data = seedmass)
+shapiro.test(seedmass$`2021_mass_25_g`[seedmass$`2021_treatment` == "ambi"])
+shapiro.test(seedmass$`2021_mass_25_g`[seedmass$`2021_treatment` == "water"])
+
+library(lme4)
+model <- lmer(`2021_mass_25_g` ~ `2021_treatment` + (1|population), data = seedmass)
+summary(model)

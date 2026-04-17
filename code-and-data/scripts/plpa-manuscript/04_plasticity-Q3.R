@@ -10,13 +10,13 @@
 # PACKAGES -----------------------------------------------------------------
 library(tidyverse)
 library(dplyr)
-#devtools::install_github("ameztegui/Plasticity")
+# devtools::install_github("ameztegui/Plasticity")
 library(Plasticity) # calculate rdpi, remember to cite, thx ameztegui
 library(agricolae) # dependency
 library(psych) # dependency
 library(dplyr) # dependency
 library(ggplot2) # dependency
-#library(sciplot) # dependency
+library(sciplot) # dependency
 #library(esquisse) # build plots
 source('code-and-data/scripts/plpa-manuscript/01_clean.R') # data
 
@@ -127,9 +127,6 @@ MORT_DAY50 <- MORT_DAY50 |>
 colnames(MORT_DAY50)
 colnames(root_plastic)
 
-#total_plastic <- total_plastic %>%
-#dplyr::select(-ends_with(".x"))  # Drop all columns ending with .x
-
 root_plastic <- root_plastic %>%
   left_join(MORT_DAY50 %>% dplyr::select(tray, tray_ab, id, pop_id, pop, `2021_treat`, `2023_treat`, TGP, trial, ot, pt, status), 
             by = c("tray", "tray_ab", "id", "pop_id", "pop", "2021_treat", "2023_treat", "TGP", "trial", "ot", "pt"))
@@ -150,7 +147,7 @@ root_plastic <- root_plastic |>
 
 # calculate RDPI CC-DD of total biomass per vpd
 tgp_root <- BIOMASS_FINAL |> 
-  filter(TGP %in% c('DD', 'CC')) |> 
+  filter(TGP %in% c('DD', 'CD')) |> 
   na.omit(root) |> 
   mutate(spring_vpd_cv = as.factor(spring_vpd_cv)) |> 
   mutate(root = as.numeric(root)) |> 
@@ -274,3 +271,46 @@ root_springvpd_rdpi
 
 ggsave("root_springvpd_rdpi.svg", root_springvpd_rdpi, path = "code-and-data/scripts/plpa-manuscript/figures",
        dpi = 300, width = 3.25, height = 3.25)
+
+
+# FIG 6 RDPI - SVPDCV ----------------------------------------------------------
+library(tidyverse)
+library(Plasticity)
+library(ggplot2)
+
+source('code-and-data/scripts/plpa-manuscript/01_clean.R') 
+
+tgp_root_dd_cd <- BIOMASS_FINAL |> 
+  filter(TGP %in% c('DD', 'CD')) |> 
+  filter(!is.na(root)) |> 
+  mutate(spring_vpd_cv = as.factor(spring_vpd_cv)) |> 
+  mutate(root = as.numeric(root)) |> 
+  mutate(TGP = as.factor(TGP))
+
+rdpi_results <- rdpi(tgp_root_dd_cd, sp = spring_vpd_cv, trait = root, factor = TGP)
+
+rdpi_summary <- rdpi_results |> 
+  group_by(sp) |> 
+  summarise(mean_rdpi = mean(rdpi, na.rm = TRUE)) |> 
+  rename(spring_vpd_cv = sp) |> 
+  mutate(spring_vpd_cv = as.numeric(as.character(spring_vpd_cv)))
+
+root_vpd_rdpi_plot <- ggplot(rdpi_summary, aes(x = spring_vpd_cv, y = mean_rdpi)) +
+  geom_point(size = 3.5, alpha = 1) +
+  geom_smooth(method = "lm", se = TRUE, color = "black", alpha = 0.3) +
+  labs(x = "spring VPD CV (%)", y = "TGP of root biomass (RDPI of DD-CD)") +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(), 
+        axis.line = element_line(colour = "black"),
+        text = element_text(family = "Helvetica"),
+        axis.title.x = element_text(color = "black", size = 10, face = "bold"),
+        axis.title.y = element_text(color = "black", size = 10, face = "bold"),
+        axis.text.x = element_text(color = "black", size = 10),
+        axis.text.y = element_text(color = "black", size = 10))
+
+print(root_vpd_rdpi_plot)
+
+cor.test(rdpi_summary$spring_vpd_cv, rdpi_summary$mean_rdpi, 
+                       use = "complete.obs", 
+                       method = "pearson")
